@@ -171,7 +171,7 @@
   })();
 
   /* ---------- いっしょに(友達同士の行動) ---------- */
-  const comeFront = async () => { const [fx, fy] = A.zoneFront(); await A.walkWorld(fx + rnd(-50, 50), fy); };
+  const comeFront = async () => { const [fx, fy] = A.zoneFront(true); await A.walkWorld(fx, fy); };
   const userSpot = () => [innerWidth / 2, innerHeight - 250];
   const bond = n => { R.bond += n; R.mood = clamp(R.mood + n); };
 
@@ -300,8 +300,6 @@
   };
   A.hooks.walk = () => { cur = null; };
   A.hooks.baseExpr = () => (!sleeping() && R.mood > 82) ? 'smile' : 'neutral'; // 機嫌がとてもいいときは、普段から笑顔
-  A.hooks.shot = () => { touch(); bond(1); };
-  A.hooks.selfiePose = () => { touch(); say(pick(['はい、チーズ!', 'いえーい!', 'かっこよく撮ってね!']), pick(['happy', 'greet', 'yes', 'dance'])); bond(2); };
   A.hooks.zoneChanged = () => { cur = null; nextAt = now() + 4000; say('おお、ここが僕の居場所ね', 'happy'); };
 
   /* ---------- 会話 ---------- */
@@ -316,7 +314,10 @@
     // --- 返事待ちへの答え
     if (pending && pending.until > now()) {
       const p = pending, yes = /^(うん|はい|いいよ|お願い|頼む|オッケー|ok|もちろん|ぜひ|やる|やろう|する)/i.test(t), no = /^(いや|ううん|大丈夫|いい(よ|です)?$|やめとく|結構|いらない)/.test(t);
-      const notName = /ありがと|こんにち|おはよ|こんばん|^うん|^はい|いいよ|よろしく|ごめん|すごい|かわいい|ただいま|おやすみ|なんで|いや|わからない/.test(t);
+      const stripped = t.replace(/^(僕|俺|私|わたし|ぼく|おれ)は/, '').replace(/(です|だよ|って呼んで|でいい|で)$/, '');
+      const notName = /ありがと|こんにち|おはよ|こんばん|^うん|^はい|いいよ|よろしく|ごめん|すごい|かわいい|ただいま|おやすみ|なんで|いや|わからない|こと|あった|した|たい|ない|から|けど|ました|いる|する|悲|嬉|楽|疲|好き|嫌い|今日|明日|昨日/.test(t)
+        || stripped.length > 8 || (/[がをに]/.test(stripped) && stripped.length > 3);
+      if (p.type === 'askName' && notName) pending = null;   // 名前らしくない答えなら、名前を聞くのはやめて普通に会話する
       if (p.type === 'askName' && t.length <= 10 && !ask && !notName) { pending = null; R.userName = t.replace(/^(僕|俺|私|わたし|ぼく|おれ)は/, '').replace(/(です|だよ|って呼んで|でいい|で)$/, '').replace(/[。.!!]/g, ''); $('userNameInput').value = R.userName; addFact('name', '名前は' + R.userName, 'name'); return { reply:`${R.userName}ね、覚えた!よろしく`, intent:'happy' }; }
       if (yes && p.type === 'massage') { pending = null; return { reply:'じゃ、失礼して…', intent:'happy', after:massage }; }
       if (yes && p.type === 'snack') { pending = null; return { reply:'やった!どれにする?', intent:'happy', after:() => { menu(); snackMenu(); acts.hidden = false; } }; }
@@ -362,7 +363,6 @@
     if (has(/肩(もんで|揉んで)/)) return { reply:'しょうがないなあ', intent:'yes', after:massage };
     if (has(/おやつ|お菓子|おかし/)) return { reply:'いいね!どれにする?', intent:'happy', after:() => { menu(); snackMenu(); acts.hidden = false; } };
     if (has(/散歩|歩こ|うろうろ/)) return { reply:'いいね、ちょっと歩こっか', intent:'happy', after:stroll };
-    if (has(/写真|自撮り|撮ろ/)) return { reply:'いいよ!撮ろ撮ろ', intent:'happy', after:() => $('selfieBtn').click() };
     if (has(/踊/)) return { reply:'見てて!', intent:'dance' };
     if (has(/(一緒に|いっしょに|しよう|やろう|遊ぼ|あそぼ)/)) { pending = { type:'play', until:now() + 3 * 60e3 }; return { reply:'いいね!じゃあじゃんけんで勝負しよっか', intent:'happy' }; }
     // --- お礼・おわび・ほめ言葉

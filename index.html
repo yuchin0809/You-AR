@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="xrRoot">
 <video id="video" playsinline muted autoplay></video>
 <div id="stage"><canvas id="me"></canvas></div>
 <div id="fxLayer"></div>
@@ -26,7 +27,7 @@
 <div id="start">
   <h1>You AR</h1>
   <p>カメラ越しの部屋で、3Dの「あなた」とルームメイトとして暮らそう。<br>
-     話したり、おやつを食べたり、じゃんけんしたり、一緒に自撮りしたり。<br>
+     話したり、おやつを食べたり、じゃんけんしたり。<br>
      カメラを起動して、暮らす場所を決めよう。映像は端末の外に送信されません。</p>
   <button id="go" disabled>ARを始める</button>
   <p id="hint" class="small"></p>
@@ -42,19 +43,8 @@
   </div>
   <div class="row">
     <button class="sub" id="actBtn">🤝 いっしょに</button>
-    <button class="sub" id="selfieBtn">🤳 自撮り</button>
-    <button id="shot">📷 撮影</button>
   </div>
 </div>
-
-<!-- 自撮りモード -->
-<div id="selfieUI" hidden>
-  <button class="sub" id="selfieExit">← もどる</button>
-  <button id="selfieShot" class="shutter" aria-label="撮影"></button>
-  <span class="small">2本指で僕を動かせるよ</span>
-</div>
-<div id="count"></div>
-<div id="flash"></div>
 
 <!-- 暮らす範囲を決める -->
 <div id="zoneUI" hidden>
@@ -81,8 +71,8 @@
   <p>起動時に決めた範囲の中を、自分で歩き回ります。</p>
   <p><button class="sub" id="zoneBtn">範囲を決め直す</button></p>
   <h3>表示</h3>
-  <label class="opt"><input id="anchor" type="checkbox" checked> 空間に固定(ジャイロ)</label>
-  <p><button class="sub" id="flip">カメラ切替</button> <button class="sub" id="mirror">左右反転</button></p>
+  <label class="opt no-xr"><input id="anchor" type="checkbox" checked> 空間に固定(ジャイロ)</label>
+  <p class="no-xr"><button class="sub" id="flip">カメラ切替</button> <button class="sub" id="mirror">左右反転</button></p>
   <h3>返事</h3>
   <label class="opt"><input id="tts" type="checkbox" checked> 声で返事する(端末の音声合成)</label>
   <label class="opt"><input id="chatter" type="checkbox" checked> ときどき自分から話しかけてくる</label>
@@ -103,6 +93,7 @@
   <p style="margin-top:22px"><button id="closePanel">閉じる</button></p>
 </div>
 
+</div>
 <script src="app.js"></script>
 <script src="roommate.js"></script>
 </body>

@@ -6,6 +6,7 @@
   const FX0 = () => ({ dx:0, dy:0, rot:0, sc:1, sy:1 });
   const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', stream:null, fx:FX0(), baseFx:null, three:null, started:false, selfie:false, walking:false, walkClip:false, hideMe:false };
   const hooks = {};
+  const xr = { on:false, supported:false };   // AR(本物の床を認識)の状態
   let baseW = 0, baseH = 0;
 
   // 端末内の保存領域(IndexedDB)。3Dモデル・モーション・育成データを保存する。サーバーは使わない
@@ -36,8 +37,10 @@
     return f;
   }
   (function loop(now) {
-    if (!animating && baseH && (state.baseFx || state.walking)) { state.fx = bodyFx(now || 0); render(); }
-    if (state.three) state.three.frame();
+    if (!xr.on) {
+      if (!animating && baseH && (state.baseFx || state.walking)) { state.fx = bodyFx(now || 0); render(); }
+      if (state.three) state.three.frame();
+    }
     requestAnimationFrame(loop);
   })();
   function setBaseFx(fn) { state.baseFx = fn; if (!fn && !animating) { state.fx = FX0(); render(); } }
@@ -67,8 +70,9 @@
   /* ---------- 配置・描画・当たり判定 ---------- */
   const off = () => state.anchorOn ? [state.ax, state.ay] : [0, 0];
   function place() { state.x = innerWidth / 2; state.y = innerHeight * 0.52; state.s = 1; state.r = 0; refAnchor(); }
-  function center() { const [ox, oy] = off(), f = state.fx; return [state.x + ox + f.dx, state.y + oy + f.dy]; }
+  function center() { if (xr.on) return xrCenter(); const [ox, oy] = off(), f = state.fx; return [state.x + ox + f.dx, state.y + oy + f.dy]; }
   function render() {
+    if (xr.on) { moveBubble(); return; }
     if (!baseH) return;
     const [cx, cy] = center(), f = state.fx;
     me.style.display = state.hideMe ? 'none' : 'block';
@@ -76,7 +80,7 @@
     moveBubble();
   }
   // 頭の位置(吹き出し・食べ物の行き先・パーティクル用)
-  function headPoint() { const [cx, cy] = center(); return [cx, cy - baseH * state.s * state.fx.sc * 0.36]; }
+  function headPoint() { if (xr.on) return xrHead(); const [cx, cy] = center(); return [cx, cy - baseH * state.s * state.fx.sc * 0.36]; }
   function moveBubble() {
     if (bubble.hidden || !baseH) return;
     const [cx, cy] = center();
@@ -86,6 +90,7 @@
   }
   // 画面上の点がモデルの見えている部分に当たっているか(透明部分は外れ)
   function hitTest(px, py) {
+    if (xr.on) return xrHit(px, py);
     if (!baseH || me.style.display !== 'block') return false;
     const [cx, cy] = center(), f = state.fx;
     let dx = px - cx, dy = py - cy;
@@ -125,15 +130,16 @@
     const d = Math.min(1, (zone.y1 - zone.y0) / (innerHeight * .4)), far = 1 - .45 * d, t = clampN((fy - zone.y0) / Math.max(1, zone.y1 - zone.y0), 0, 1);
     return zone.sizeK * (far + (1 - far) * t);
   };
-  const feet = () => [state.x, state.y + baseH * state.s / 2];
-  const toWorld = (px, py) => { const [ox, oy] = off(); return [px - ox, py - oy]; };
+  const feet = () => xr.on ? [xr.avatar.position.x, xr.avatar.position.z] : [state.x, state.y + baseH * state.s / 2];
+  const toWorld = (px, py) => { if (xr.on) return xrToWorld(px, py); const [ox, oy] = off(); return [px - ox, py - oy]; };
   function placeAt(wx, wfy) {
+    if (xr.on) { const [x, z] = xrClamp(wx, wfy); xr.avatar.position.set(x, xr.floorY, z); return; }
     wx = clampN(wx, zone.x0, zone.x1); wfy = clampN(wfy, zone.y0, zone.y1);
     state.s = zoneScale(wfy); state.x = wx; state.y = wfy - baseH * state.s / 2; render();
   }
-  const zoneRandom = () => [zone.x0 + Math.random() * (zone.x1 - zone.x0), zone.y0 + Math.random() * (zone.y1 - zone.y0)];
-  const zoneFront = () => [(zone.x0 + zone.x1) / 2, zone.y1 - 4];
-  const inZone = (wx, wfy) => wx >= zone.x0 && wx <= zone.x1 && wfy >= zone.y0 && wfy <= zone.y1;
+  const zoneRandom = () => xr.on ? xrRandom() : [zone.x0 + Math.random() * (zone.x1 - zone.x0), zone.y0 + Math.random() * (zone.y1 - zone.y0)];
+  const zoneFront = jit => xr.on ? xrFront(jit) : [(zone.x0 + zone.x1) / 2 + (jit ? (Math.random() - .5) * 100 : 0), zone.y1 - 4];
+  const inZone = (wx, wfy) => xr.on ? Math.hypot(wx - xr.c.x, wfy - xr.c.z) <= xr.r : wx >= zone.x0 && wx <= zone.x1 && wfy >= zone.y0 && wfy <= zone.y1;
 
   let walkTok = 0;
   function endWalk() {
@@ -142,9 +148,10 @@
     state.walkClip = false;
     if (!state.baseFx && !animating) { state.fx = FX0(); render(); }
   }
-  function stopWalk() { walkTok++; cancelAnimationFrame(walkRaf); if (state.walking) endWalk(); }
+  function stopWalk() { if (xr.on) return xrStop(); walkTok++; cancelAnimationFrame(walkRaf); if (state.walking) endWalk(); }
   // 世界座標の(tx, tfy)=足元の位置まで歩く。着いたら true、途中で止められたら false
   function walkWorld(tx, tfy) {
+    if (xr.on) return xrWalk(tx, tfy);
     const tok = ++walkTok; cancelAnimationFrame(walkRaf);
     tx = clampN(tx, zone.x0, zone.x1); tfy = clampN(tfy, zone.y0, zone.y1);
     const [sx, sfy] = feet(), dist = Math.hypot(tx - sx, tfy - sfy);
@@ -235,7 +242,8 @@
       const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), ang = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
       const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
       if (pinch) {
-        if (zone.on) { const [fx, ffy] = feet(); zone.sizeK = clampN(zone.sizeK * dist / pinch.dist, .2, 1.6); placeAt(fx, ffy); }  // 暮らす範囲の中では、つまんで大きさだけ変える
+        if (xr.on) { xr.scale = clampN(xr.scale * dist / pinch.dist, .3, 1.3); xr.avatar.scale.setScalar(xr.scale); }   // ARでは、つまんで大きさを変える
+        else if (zone.on) { const [fx, ffy] = feet(); zone.sizeK = clampN(zone.sizeK * dist / pinch.dist, .2, 1.6); placeAt(fx, ffy); }  // 暮らす範囲の中では、つまんで大きさだけ変える
         else {
           state.s = Math.min(6, Math.max(0.1, state.s * dist / pinch.dist)); state.r += ang - pinch.ang;
           state.x += mx - pinch.mx; state.y += my - pinch.my;
@@ -263,7 +271,8 @@
   stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
   stage.addEventListener('wheel', e => {
     e.preventDefault(); const k = e.deltaY < 0 ? 1.08 : 0.92;
-    if (zone.on) { const [fx, ffy] = feet(); zone.sizeK = clampN(zone.sizeK * k, .2, 1.6); placeAt(fx, ffy); }
+    if (xr.on) { xr.scale = clampN(xr.scale * k, .3, 1.3); xr.avatar.scale.setScalar(xr.scale); }
+    else if (zone.on) { const [fx, ffy] = feet(); zone.sizeK = clampN(zone.sizeK * k, .2, 1.6); placeAt(fx, ffy); }
     else { state.s = Math.min(6, Math.max(0.1, state.s * k)); render(); }
   }, { passive:false });
 
@@ -298,72 +307,6 @@
   }
   $('anchor').onchange = e => setAnchor(e.target.checked);
 
-  /* ---------- 撮影 ---------- */
-  function composite() {
-    const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
-    const W = innerWidth, H = innerHeight, k = Math.max(W / vw, H / vh);
-    const out = document.createElement('canvas'), S = 2; out.width = W * S; out.height = H * S;
-    const c = out.getContext('2d'); c.scale(S, S);
-    c.save();
-    if (state.facing === 'user') { c.translate(W, 0); c.scale(-1, 1); }
-    c.drawImage(video, (W - vw * k) / 2, (H - vh * k) / 2, vw * k, vh * k);
-    c.restore();
-    const [cx, cy] = center(), f = state.fx;
-    c.translate(cx, cy); c.rotate(state.r + f.rot); c.scale(state.s * state.flip * f.sc, state.s * f.sc * f.sy);
-    c.drawImage(me, -baseW / 2, -baseH / 2, baseW, baseH);
-    return out;
-  }
-  // 共有シート(写真アプリに保存できる)が使えればそれで、無理ならダウンロード
-  function takeShot() {
-    const out = composite(); if (!out) return;
-    out.toBlob(async b => {
-      const file = new File([b], 'you-ar-' + Date.now() + '.png', { type:'image/png' });
-      if (navigator.canShare && navigator.canShare({ files:[file] })) {
-        try { await navigator.share({ files:[file] }); return; } catch (e) { if (e.name === 'AbortError') return; }
-      }
-      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = file.name; a.click();
-      toast('保存しました');
-    }, 'image/png');
-    hooks.shot && hooks.shot();
-  }
-  $('shot').onclick = takeShot;
-
-  /* ---------- 自撮りモード(内カメラ・並んで撮る) ---------- */
-  let before = null;
-  async function enterSelfie() {
-    stopWalk();
-    before = { facing:state.facing, x:state.x, y:state.y, s:state.s, r:state.r, anchor:state.anchorOn, zone:zone.on };
-    zone.on = false;
-    state.facing = 'user';
-    try { await startCamera(); } catch (_) { state.facing = before.facing; return; }
-    setAnchor(false);
-    state.selfie = true; state.r = 0; state.s = 0.85;
-    state.x = innerWidth * 0.72; state.y = innerHeight - baseH * state.s / 2 - 150; render();
-    $('bar').style.display = 'none'; $('selfieUI').hidden = false;
-    toast('となりに並んでポーズ!');
-  }
-  async function exitSelfie() {
-    state.selfie = false;
-    $('selfieUI').hidden = true; $('bar').style.display = 'flex';
-    if (!before) return;
-    state.facing = before.facing; Object.assign(state, { x:before.x, y:before.y, s:before.s, r:before.r }); zone.on = before.zone;
-    await startCamera().catch(() => {});
-    setAnchor(before.anchor); render();
-  }
-  let counting = false;
-  async function selfieCountdown() {
-    if (counting) return; counting = true;
-    const cnt = $('count'), wait = ms => new Promise(r => setTimeout(r, ms));
-    hooks.selfiePose ? hooks.selfiePose() : play(pick(['happy', 'greet', 'yes']));
-    for (const n of [3, 2, 1]) { cnt.textContent = n; await wait(800); }
-    cnt.textContent = '';
-    const fl = $('flash'); fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 60);
-    takeShot(); counting = false;
-  }
-  $('selfieBtn').onclick = enterSelfie;
-  $('selfieExit').onclick = exitSelfie;
-  $('selfieShot').onclick = selfieCountdown;
-
   /* ---------- 動き(3Dモーションが無いときの簡易アニメーション) ---------- */
   const env = (t, a = .15) => t < a ? t / a : t > 1 - a ? (1 - t) / a : 1;
   const ANIMS = {
@@ -381,6 +324,7 @@
   const TALK_INTENTS = ['greet','happy','sad','bye','yes','no','surprise','dance'];
   let animRaf = 0;
   function runAnim(id) {
+    if (xr.on) return;
     const A = ANIMS[id] || ANIMS.yes, t0 = performance.now();
     cancelAnimationFrame(animRaf); animating = true;
     const step = now => {
@@ -468,6 +412,7 @@
     showBubble(reply, opts.summary || '', opts.ms || 6000);
     if (opts.voice !== false) speak(reply);
     play(intent); emote(intent);
+    if (xr.on) xr.faceUntil = performance.now() + 3500;   // 話すときはこちらを向く
   }
   async function handle(text) {
     text = (text || '').trim(); if (!text) return;
@@ -589,7 +534,8 @@
           if (!loopAction) return; const a = loopAction; loopAction = null;
           if (idleAction) { idleAction.reset().play(); a.crossFadeTo(idleAction, .3, false); current = idleAction; } else { a.fadeOut(.3); current = null; }
         },
-        setExpr,
+        setExpr, model,
+        update(dt) { mixer.update(dt); },
         frame() {
           mixer.update(clock.getDelta());
           renderer.render(scene, cam);
@@ -612,8 +558,155 @@
   }
   async function loadFile(file) { state.three = null; return loadModel(file); }
 
+
+  /* ---------- AR(WebXR):本物の床を認識して、その上で暮らす(Android の Chrome) ----------
+   * 床を見つけて、暮らす場所(円)を決める。等身大の3Dが床に立ち、影を落とし、円の中を歩き回る。
+   * 画面上の位置(吹き出し・当たり判定)は、毎フレーム3Dの位置から計算する。 */
+  (async () => { try { xr.supported = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch (_) {} if (xr.supported) $('go').textContent = 'ARを始める(床を認識)'; })();
+
+  async function startXR() {
+    const { T } = await lib();
+    if (!state.three || !state.three.model) throw new Error('3Dモデルの読み込み前です');
+    const session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay'], domOverlay:{ root:$('xrRoot') } });
+    const renderer = new T.WebGLRenderer({ alpha:true, antialias:true });
+    renderer.setPixelRatio(devicePixelRatio); renderer.setSize(innerWidth, innerHeight);
+    renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local');
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    const scene = new T.Scene(), camera = new T.PerspectiveCamera(70, innerWidth / innerHeight, .01, 50);
+    scene.add(new T.HemisphereLight(0xffffff, 0x777788, 1.7));
+    const sun = new T.DirectionalLight(0xffffff, 1.5); sun.castShadow = true;
+    Object.assign(sun.shadow.camera, { left:-1.5, right:1.5, top:1.5, bottom:-1.5, near:.1, far:8 }); sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -.0005;
+    scene.add(sun, sun.target);
+    // 影だけを受ける透明な床
+    const shadow = new T.Mesh(new T.PlaneGeometry(8, 8).rotateX(-Math.PI / 2), new T.ShadowMaterial({ opacity:.32 })); shadow.receiveShadow = true; shadow.visible = false; scene.add(shadow);
+    const reticle = new T.Mesh(new T.RingGeometry(.1, .13, 40).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ color:0xffffff })); reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+    const ring = new T.Mesh(new T.RingGeometry(.97, 1, 72).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ color:0xff4f81, transparent:true, opacity:.75 })); ring.visible = false; scene.add(ring);
+    const avatar = new T.Group(); avatar.visible = false; scene.add(avatar);
+    const model = state.three.model; model.removeFromParent(); avatar.add(model);
+    model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    Object.assign(xr, { on:true, T, session, renderer, scene, camera, reticle, ring, shadow, avatar, model, sun, headBone:model.getObjectByName('Head'),
+      floorY:0, c:{ x:0, z:-1.5 }, r:1.4, scale:1, face:0, faceUntil:0, target:null, walkRes:null, hit:null, placing:true,
+      head:[innerWidth / 2, innerHeight * .3], headTop:[innerWidth / 2, innerHeight * .25], foot:[innerWidth / 2, innerHeight * .7], cam:null });
+    document.body.classList.add('xr');
+    await renderer.xr.setSession(session);
+    const viewer = await session.requestReferenceSpace('viewer');
+    xr.hitSource = await session.requestHitTestSource({ space:viewer });
+    session.addEventListener('end', () => location.reload());
+    const clock = new T.Clock();
+    renderer.setAnimationLoop((t, frame) => xrFrame(Math.min(.05, clock.getDelta()), frame));
+  }
+
+  function xrFrame(dt, frame) {
+    const T = xr.T, ref = xr.renderer.xr.getReferenceSpace(), av = xr.avatar, now = performance.now();
+    // 床探し:画面の真ん中から床へ光線を飛ばして、白い丸を置く
+    if (frame && xr.hitSource && xr.placing) {
+      const hits = frame.getHitTestResults(xr.hitSource);
+      if (hits.length) { const p = hits[0].getPose(ref); xr.reticle.visible = true; xr.reticle.matrix.fromArray(p.transform.matrix); xr.hit = p.transform.position; }
+      else { xr.reticle.visible = false; xr.hit = null; }
+      xr.onHit && xr.onHit(!!xr.hit);
+    }
+    const camPos = new T.Vector3(); (xr.cam || xr.camera).getWorldPosition(camPos);
+    // 歩く(歩く方向を向く)
+    if (xr.target) {
+      const dx = xr.target[0] - av.position.x, dz = xr.target[1] - av.position.z, d = Math.hypot(dx, dz), step = .55 * xr.scale * dt;
+      xr.face = Math.atan2(dx, dz);
+      if (d <= step) { av.position.x = xr.target[0]; av.position.z = xr.target[1]; const r = xr.walkRes; xr.target = null; xr.walkRes = null; endWalk(); r && r(true); }
+      else { av.position.x += dx / d * step; av.position.z += dz / d * step; }
+    } else if (now < xr.faceUntil) xr.face = Math.atan2(camPos.x - av.position.x, camPos.z - av.position.z);   // 話すときはこちらを向く
+    let turn = xr.face - av.rotation.y; turn = Math.atan2(Math.sin(turn), Math.cos(turn)); av.rotation.y += turn * Math.min(1, dt * 6);
+    state.three.update(dt);
+    if (state.baseFx && xr.headBone) xr.headBone.rotation.x += .5;   // 寝ている:首が前に落ちる
+    xr.sun.position.set(av.position.x + .8, xr.floorY + 3, av.position.z + 1.2); xr.sun.target.position.copy(av.position);
+    xr.renderer.render(xr.scene, xr.camera);
+    // 画面上の位置
+    const xc = xr.renderer.xr.getCamera(), vc = xc.cameras && xc.cameras.length ? xc.cameras[0] : xc; xr.cam = vc;
+    const proj = v => { const p = v.project(vc); return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight]; };
+    const h = 1.7 * xr.scale, P = av.position;
+    xr.foot = proj(P.clone()); xr.head = proj(new T.Vector3(P.x, P.y + h * .9, P.z)); xr.headTop = proj(new T.Vector3(P.x, P.y + h, P.z));
+    if (baseH) state.s = Math.max(.05, (xr.foot[1] - xr.headTop[1]) / baseH);
+    moveBubble();
+  }
+  const xrCenter = () => [(xr.foot[0] + xr.headTop[0]) / 2, (xr.foot[1] + xr.headTop[1]) / 2];
+  const xrHead = () => xr.head.slice();
+  // 画面上の点が、体のまわり(縦長のカプセル)に入っているか
+  function xrHit(px, py) {
+    if (!xr.avatar || !xr.avatar.visible) return false;
+    const [ax, ay] = xr.headTop, [bx, by] = xr.foot, w = Math.abs(by - ay) * .17, L = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
+    const t = clampN(((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / L, 0, 1);
+    return Math.hypot(px - (ax + (bx - ax) * t), py - (ay + (by - ay) * t)) < w;
+  }
+  // 画面の点から床へ光線を飛ばした位置(呼ぶときの行き先)
+  function xrToWorld(px, py) {
+    const T = xr.T, rc = new T.Raycaster(), p = new T.Vector3();
+    rc.setFromCamera(new T.Vector2(px / innerWidth * 2 - 1, -(py / innerHeight * 2 - 1)), xr.cam || xr.camera);
+    return rc.ray.intersectPlane(new T.Plane(new T.Vector3(0, 1, 0), -xr.floorY), p) ? [p.x, p.z] : [xr.avatar.position.x, xr.avatar.position.z];
+  }
+  function xrClamp(x, z) { const dx = x - xr.c.x, dz = z - xr.c.z, d = Math.hypot(dx, dz), m = xr.r * .92; return d > m ? [xr.c.x + dx / d * m, xr.c.z + dz / d * m] : [x, z]; }
+  const xrRandom = () => { const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * xr.r * .9; return [xr.c.x + Math.cos(a) * d, xr.c.z + Math.sin(a) * d]; };
+  // 円の中で、こちらに近いあたり(近づきすぎない)
+  function xrFront(jit) {
+    const cp = new xr.T.Vector3(); (xr.cam || xr.camera).getWorldPosition(cp);
+    let dx = cp.x - xr.c.x, dz = cp.z - xr.c.z; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+    const k = Math.max(0, Math.min(xr.r * .8, d - .9)), j = jit ? (Math.random() - .5) * .5 : 0;
+    return xrClamp(xr.c.x + dx * k - dz * j, xr.c.z + dz * k + dx * j);
+  }
+  function xrWalk(tx, tz) {
+    [tx, tz] = xrClamp(tx, tz);
+    if (xr.walkRes) { const r = xr.walkRes; xr.walkRes = null; r(false); }
+    if (Math.hypot(tx - xr.avatar.position.x, tz - xr.avatar.position.z) < .05) return Promise.resolve(true);
+    state.walking = true;
+    if (!state.walkClip) state.walkClip = !!(state.three && state.three.loop('walk'));
+    hooks.walk && hooks.walk();
+    return new Promise(res => { xr.target = [tx, tz]; xr.walkRes = res; });
+  }
+  function xrStop() { if (xr.walkRes) { const r = xr.walkRes; xr.walkRes = null; xr.target = null; r(false); } xr.target = null; if (state.walking) endWalk(); }
+
+  // 床を見つけて、暮らす場所の真ん中と広さを決める
+  function runXRZoneSetup() {
+    return new Promise(resolve => {
+      const ui = $('zoneUI'), msg = $('zoneMsg'), btns = $('zoneBtns'), sizeBox = $('zoneSize'), range = $('sizeRange'), labels = sizeBox.querySelectorAll('span');
+      xrStop(); zone.on = false; ui.hidden = false; ui.classList.add('top', 'xrSetup'); ui.onpointerdown = ui.onpointermove = ui.onpointerup = null;
+      $('zoneRect').hidden = true; bubble.hidden = true; $('bar').style.display = 'none';
+      const button = (label, fn, cls = '', dis = false) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.disabled = dis; b.onclick = () => fn(); btns.append(b); return b; };
+      function stepFind() {
+        btns.textContent = ''; sizeBox.hidden = true; xr.placing = true; xr.avatar.visible = false; xr.ring.visible = false; xr.ring.material.opacity = .75;
+        msg.innerHTML = '<b>① 床を見つけよう</b><br>スマホをゆっくり動かして床を映してね。白い丸が出たら、暮らす場所の真ん中に合わせて「ここ」を押してね。';
+        const ok = button('ここ', place, '', true);
+        xr.onHit = has => { ok.disabled = !has; };
+      }
+      function place() {
+        if (!xr.hit) return;
+        xr.onHit = null; xr.placing = false; xr.reticle.visible = false;
+        xr.c = { x:xr.hit.x, z:xr.hit.z }; xr.floorY = xr.hit.y;
+        xr.shadow.position.set(xr.c.x, xr.floorY + .001, xr.c.z); xr.shadow.visible = true;
+        xr.ring.position.set(xr.c.x, xr.floorY + .004, xr.c.z); xr.ring.scale.setScalar(xr.r); xr.ring.visible = true;
+        xr.avatar.position.set(xr.c.x, xr.floorY, xr.c.z); xr.avatar.visible = true; xr.faceUntil = performance.now() + 1e9;
+        btns.textContent = ''; sizeBox.hidden = false; range.min = 40; range.max = 300; range.value = Math.round(xr.r * 100);
+        labels[0].textContent = '狭い'; labels[1].textContent = '広い';
+        msg.innerHTML = '<b>② 広さを決めよう</b><br>ピンクの円の中を、僕が歩き回るよ。スライダーで広さを変えてね。';
+        button('やり直す', stepFind, 'sub'); button('ここで暮らす', finish);
+      }
+      range.oninput = () => { if (xr.placing) return; xr.r = range.value / 100; xr.ring.scale.setScalar(xr.r); };
+      function finish() {
+        ui.hidden = true; ui.classList.remove('top', 'xrSetup');
+        range.min = 20; range.max = 160; labels[0].textContent = '小'; labels[1].textContent = '大';
+        xr.ring.material.opacity = .3; setTimeout(() => { if (zone.on) xr.ring.visible = false; }, 3000);
+        zone.on = true; xr.faceUntil = 0; $('bar').style.display = 'flex'; resolve();
+      }
+      stepFind();
+    });
+  }
+
   /* ---------- UI ---------- */
   $('go').onclick = async () => {
+    if (xr.supported) {   // Android の Chrome など:本物の床を認識するAR
+      try { await startXR(); } catch (e) { toast('ARを開始できません: ' + (e.message || e)); return; }
+      $('start').style.display = 'none';
+      await runXRZoneSetup();
+      $('gear').style.display = 'block'; state.started = true;
+      hooks.started ? hooks.started() : toast('ダブルタップで呼べるよ');
+      return;
+    }
     await enableMotion();
     try { await startCamera(); } catch (_) { return; }
     $('start').style.display = 'none'; refAnchor();
@@ -624,7 +717,7 @@
   $('flip').onclick = async () => { state.facing = state.facing === 'environment' ? 'user' : 'environment'; await startCamera(); };
   $('mirror').onclick = () => { state.flip *= -1; render(); };
   $('gear').onclick = () => { $('panel').hidden = false; };
-  $('zoneBtn').onclick = async () => { $('panel').hidden = true; await runZoneSetup(); hooks.zoneChanged && hooks.zoneChanged(); };
+  $('zoneBtn').onclick = async () => { $('panel').hidden = true; await (xr.on ? runXRZoneSetup() : runZoneSetup()); hooks.zoneChanged && hooks.zoneChanged(); };
   $('closePanel').onclick = () => { $('panel').hidden = true; };
   addEventListener('resize', () => render());
 
@@ -644,6 +737,6 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 育成などの拡張用API
-  window.YouAR = { $, idb, state, hooks, zone, play, say, setExpr, emote, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render,
-    walkWorld, stopWalk, placeAt, feet, toWorld, zoneRandom, zoneFront, inZone, runZoneSetup, llmJSON, ruleUnderstand, takeShot, TALK_INTENTS };
+  window.YouAR = { $, idb, state, hooks, zone, xr, play, say, setExpr, emote, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render,
+    walkWorld, stopWalk, placeAt, feet, toWorld, zoneRandom, zoneFront, inZone, runZoneSetup, llmJSON, ruleUnderstand, TALK_INTENTS };
 })();
