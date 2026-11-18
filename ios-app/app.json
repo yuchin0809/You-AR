@@ -19,7 +19,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "部屋の床を認識して、3Dのルームメイトを表示するためにカメラを使います。映像は端末の外に送信されません。",
         "NSMicrophoneUsageDescription": "声で話しかけるためにマイクを使います。",
-        "NSSpeechRecognitionUsageDescription": "話しかけた言葉を文字にするために音声認識を使います。"
+        "NSSpeechRecognitionUsageDescription": "話しかけた言葉を文字にするために音声認識を使います。",
+        "NSLocationWhenInUseUsageDescription": "このアプリは位置情報を使いません。AR機能のライブラリに位置情報に対応した機能が含まれているため、この説明を表示しています。"
       }
     },
     "plugins": [
