@@ -16,6 +16,7 @@
   #start h1 { margin:0; font-size:2.4rem; letter-spacing:.04em; }
   #start p { margin:0; opacity:.8; line-height:1.6; max-width:30em; }
   button, label.btn { appearance:none; border:0; border-radius:999px; padding:14px 22px; font-size:1rem; font-weight:600; color:#fff; background:var(--accent); cursor:pointer; display:inline-block; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
   button.sub, label.sub { background:rgba(255,255,255,.16); backdrop-filter:blur(8px); }
   #bar { position:fixed; left:0; right:0; bottom:0; padding:12px 12px calc(12px + env(safe-area-inset-bottom)); display:none; flex-direction:column; gap:10px; background:linear-gradient(transparent,rgba(0,0,0,.6)); z-index:5; }
   #bar .row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; align-items:center; }
@@ -36,8 +37,6 @@
   #panel { position:fixed; inset:0; z-index:15; background:rgba(10,10,20,.94); padding:20px; overflow:auto; }
   #panel[hidden] { display:none; }
   #panel h3 { margin:18px 0 6px; } #panel label.opt { display:block; margin:8px 0; line-height:1.5; }
-  #panel .clip { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:6px 0; font-size:.9rem; }
-  #panel .clip span.ok { color:#6f6; }
   #panel p { opacity:.75; font-size:.85rem; margin:4px 0; }
   input[type=file] { display:none; }
 </style>
@@ -48,10 +47,10 @@
 
 <div id="start">
   <h1>You AR</h1>
-  <p>カメラ越しの世界に「あなた」を登場させます。<br>
-     写真を選んで、カメラを起動してください。映像は端末の外に送信されません。<br>動きを出したいときは、無地(緑など)の背景で撮った全身動画を選んでください。</p>
-  <label class="btn sub" for="file0">① 自分の写真・動画・3D(.glb)を選ぶ</label>
-  <input id="file0" type="file" accept="image/*,video/*,.glb,.gltf">
+  <p>カメラ越しの世界に、あなたの3Dモデルを登場させます。<br>
+     骨格付きの3Dモデル(.glb)を選んで、カメラを起動してください。映像は端末の外に送信されません。</p>
+  <label class="btn sub" for="file0">① 自分の3Dモデル(.glb)を選ぶ</label>
+  <input id="file0" type="file" accept=".glb,.gltf">
   <button id="go" disabled>② ARを始める</button>
   <p id="hint" style="font-size:.85rem"></p>
 </div>
@@ -63,13 +62,11 @@
     <button id="mic" class="sub" title="音声で話しかける">🎤</button>
   </div>
   <div class="row">
-    <label class="range">背景除去 <input id="tol" type="range" min="0" max="120" value="40"></label>
-    <label class="range"><input id="keyOn" type="checkbox" checked> 背景を消す</label>
     <label class="range"><input id="anchor" type="checkbox" checked> 空間に固定</label>
   </div>
   <div class="row">
-    <label class="btn sub" for="file1">写真/動画変更</label>
-    <input id="file1" type="file" accept="image/*,video/*,.glb,.gltf">
+    <label class="btn sub" for="file1">3Dモデル変更</label>
+    <input id="file1" type="file" accept=".glb,.gltf">
     <button class="sub" id="flip">カメラ切替</button>
     <button class="sub" id="mirror">左右反転</button>
     <button id="shot">📷 撮影</button>
@@ -85,9 +82,7 @@
   <h3>3Dモーション(.glb、複数選択可)</h3>
   <p>Mixamoなどで書き出した動き(骨格付き.glb)を選びます。ファイル名に dance / wave / happy / sad / nod / shake / surprise などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
   <p><label class="btn sub" style="padding:8px 14px;font-size:.85rem">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
-  <h3>動作ごとの動画(2D用・任意)</h3>
-  <p>登録しない動作は、今の写真・動画を動かして表現します。動画は再生後に元の姿勢へ戻ります。背景は同じ色で撮ってください。</p>
-  <div id="clipList"></div>
+  <p>動きを登録しなくても、話しかけると3Dモデルが跳ねる・傾くなどの簡単な動きで反応します。</p>
   <p style="margin-top:18px"><button id="closePanel">閉じる</button></p>
 </div>
 
@@ -95,34 +90,19 @@
 (() => {
   const $ = id => document.getElementById(id);
   const video = $('video'), stage = $('stage'), me = $('me');
-  const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', src:null, cut:null, stream:null };
+  const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', cut:null, stream:null };
   let baseW = 0, baseH = 0;
-  state.fx = { dx:0, dy:0, rot:0, sc:1, sy:1 }; state.idleVid = null; state.clips = {};
+  state.fx = { dx:0, dy:0, rot:0, sc:1, sy:1 };
   const bubble = $('bubble');
 
   const toast = msg => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),2200); };
 
-  /* ---------- 画像・動画の読み込み & 背景除去 ---------- */
-  state.vid = null;
+  /* ---------- 3Dモデルの読み込み ---------- */
   function loadFile(file) {
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    if (state.vid) { state.vid.pause(); state.vid = null; } state.idleVid = null;
-    state.src = null;
-    state.three = null;
-    if (/\.(glb|gltf)$/i.test(file.name)) { loadModel(file); return; }
-    if (file.type.startsWith('video')) {
-      const v = document.createElement('video');
-      v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', '');
-      v.onloadeddata = () => { v.play().catch(()=>{}); state.vid = v; state.idleVid = v; setSource(v.videoWidth, v.videoHeight, 720); keyFrame(v); $('go').disabled = false; $('hint').textContent = '動画を読み込みました'; };
-      v.src = url;
-    } else {
-      const img = new Image();
-      img.onload = () => { state.src = img; setSource(img.width, img.height, 1200); keyFrame(img); $('go').disabled = false; $('hint').textContent = '写真を読み込みました'; };
-      img.src = url;
-    }
+    if (!/\.(glb|gltf)$/i.test(file.name)) { toast('3Dモデル(.glb)を選んでください'); return; }
+    state.three = null; loadModel(file);
   }
-
   function setSource(w, h, max) {
     const k = Math.min(1, max / Math.max(w, h));
     me.width = Math.round(w * k); me.height = Math.round(h * k);
@@ -131,28 +111,8 @@
     if (!me.dataset.placed) { place(); me.dataset.placed = 1; }
     render();
   }
-
-  // 四隅の色を背景とみなし、近い色を透明にする(無地・グリーンバック向けの簡易クロマキー)
-  function keyFrame(source) {
-    const g = me.getContext('2d', { willReadFrequently:true }), W = me.width, H = me.height;
-    g.clearRect(0, 0, W, H); g.drawImage(source, 0, 0, W, H);
-    if (!$('keyOn').checked) return;
-    const d = g.getImageData(0, 0, W, H), a = d.data;
-    const pts = [[2,2],[W-3,2],[2,H-3],[W-3,H-3]].map(([x,y]) => { const i=(y*W+x)*4; return [a[i],a[i+1],a[i+2],a[i+3]]; });
-    if (pts.some(p => p[3] < 250)) return; // すでに透過あり
-    const bg = [0,1,2].map(k => pts.reduce((s,p)=>s+p[k],0)/4);
-    const tol = +$('tol').value, soft = 25;
-    for (let i = 0; i < a.length; i += 4) {
-      const dist = Math.hypot(a[i]-bg[0], a[i+1]-bg[1], a[i+2]-bg[2]);
-      if (dist < tol) a[i+3] = 0;
-      else if (dist < tol + soft) a[i+3] = Math.round(255 * (dist - tol) / soft);
-    }
-    g.putImageData(d, 0, 0);
-  }
   state.cut = me;
-  function applyKey() { if (state.src) keyFrame(state.src); }
   (function loop() {
-    if (state.vid && state.vid.readyState >= 2) keyFrame(state.vid);
     if (state.three) state.three.frame();
     requestAnimationFrame(loop);
   })();
@@ -239,7 +199,6 @@
   /* ---------- UI ---------- */
   $('file0').onchange = e => loadFile(e.target.files[0]);
   $('file1').onchange = e => loadFile(e.target.files[0]);
-  $('tol').oninput = applyKey; $('keyOn').onchange = applyKey;
   $('go').onclick = async () => {
     await enableMotion();
     try { await startCamera(); } catch (_) { return; }
@@ -271,10 +230,6 @@
 
 
   /* ---------- 会話:聞き取り → 理解 → 動作 ---------- */
-  const MOTIONS = {
-    greet:'あいさつ', happy:'喜ぶ', sad:'悲しむ', bye:'バイバイ',
-    yes:'うなずく', no:'首を振る', surprise:'驚く', dance:'踊る'
-  };
   const FX0 = () => ({ dx:0, dy:0, rot:0, sc:1, sy:1 });
   const env = (t, a = .15) => t < a ? t / a : t > 1 - a ? (1 - t) / a : 1;
   const ANIMS = {
@@ -301,14 +256,7 @@
   }
   function play(id) {
     if (state.three && state.three.play(id)) return;
-    const clip = state.clips[id];
-    if (clip) {
-      state.vid = clip; clip.currentTime = 0; clip.play().catch(() => {});
-      clip.onended = () => {
-        state.vid = state.idleVid;
-        if (state.idleVid) state.idleVid.play().catch(() => {}); else if (state.src) keyFrame(state.src);
-      };
-    } else runAnim(id);
+    runAnim(id);
   }
 
   // キーワードによる理解(AIを使わない標準モード。オフライン・即時)
@@ -400,23 +348,9 @@
     rec.start(); $('mic').classList.add('on'); toast('話しかけてください');
   };
 
-  // 設定パネル / 動作ごとの動画登録
+  // 設定パネル
   $('gear').onclick = () => { $('panel').hidden = false; };
   $('closePanel').onclick = () => { $('panel').hidden = true; };
-  for (const [id, label] of Object.entries(MOTIONS)) {
-    const row = document.createElement('div'); row.className = 'clip';
-    row.innerHTML = '<span></span><span><label class="btn sub" style="padding:8px 14px;font-size:.85rem">動画を選ぶ<input type="file" accept="video/*"></label> <button class="sub" style="padding:8px 14px;font-size:.85rem">試す</button></span>';
-    const [nameEl, ctl] = row.children; nameEl.textContent = label;
-    const input = row.querySelector('input'), test = row.querySelector('button');
-    input.onchange = () => {
-      const f = input.files[0]; if (!f) return;
-      const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
-      v.src = URL.createObjectURL(f); state.clips[id] = v; nameEl.textContent = label + ' ✓';
-    };
-    test.onclick = () => { $('panel').hidden = true; play(id); };
-    $('clipList').append(row);
-  }
-
 
   /* ---------- 3Dモデル(.glb) ---------- */
   state.three = null;
@@ -511,7 +445,7 @@
       addClips(gltf.animations, file.name.replace(/\.[^.]+$/, ''));
       const idle = motionPool.find(m => m.tags.has('idle'));
       if (idle) { idleAction = make(idle.clip); idleAction.play(); current = idleAction; }
-      setSource(W, H, 768); state.src = null; state.vid = null; state.idleVid = null;
+      setSource(W, H, 768);
       $('go').disabled = false; $('hint').textContent = '3Dモデルを読み込みました';
       showBubble('3Dモデルを読み込みました', '', 2000);
     } catch (err) {
@@ -526,8 +460,8 @@
     toast('モーションを追加しました');
   };
 
-  // リポジトリに me.png があれば自動で読み込む
-  fetch('me.png').then(r => r.ok ? r.blob() : null).then(b => { if (b && b.type.startsWith('image')) loadFile(b); }).catch(() => {});
+  // リポジトリに me.glb があれば自動で読み込む
+  fetch('me.glb').then(r => r.ok ? r.blob() : null).then(b => { if (b && b.size > 1000) loadFile(new File([b], 'me.glb')); }).catch(() => {});
 })();
 </script>
 </body>
