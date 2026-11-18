@@ -27,10 +27,8 @@
   <h1>You AR</h1>
   <p>カメラ越しの部屋で、3Dの「あなた」とルームメイトとして暮らそう。<br>
      話したり、おやつを食べたり、じゃんけんしたり、一緒に自撮りしたり。<br>
-     骨格付きの3Dモデル(.glb)を選んで、カメラを起動してください。映像は端末の外に送信されません。</p>
-  <label class="btn sub" for="file0">① 自分の3Dモデル(.glb)を選ぶ</label>
-  <input id="file0" type="file" accept=".glb,.gltf">
-  <button id="go" disabled>② ARを始める</button>
+     カメラを起動して、暮らす場所を決めよう。映像は端末の外に送信されません。</p>
+  <button id="go" disabled>ARを始める</button>
   <p id="hint" class="small"></p>
 </div>
 
@@ -89,13 +87,6 @@
   <label class="opt"><input id="tts" type="checkbox" checked> 声で返事する(端末の音声合成)</label>
   <label class="opt"><input id="chatter" type="checkbox" checked> ときどき自分から話しかけてくる</label>
   <label class="opt"><input id="llm" type="checkbox"> AIで会話する(記憶つきで自然に話します。WebLLM。初回のみ約1GBをダウンロード。WebGPU対応の端末向け)</label>
-  <h3>3Dモデル</h3>
-  <p><label class="btn sub" for="file1">3Dモデル変更</label><input id="file1" type="file" accept=".glb,.gltf"></p>
-  <h3>3Dモーション(.glb、複数選択可)</h3>
-  <p>Mixamoなどで書き出した動き(骨格付き.glb)。ファイル名に dance / wave / happy / sad / nod / shake / surprise / eat / walk / idle などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
-  <p><label class="btn sub">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
-  <p><button class="sub" id="clearMotions">追加したモーションを全部消す</button></p>
-  <p>選んだ3Dモデルとモーションはこの端末に保存され、次回から自動で読み込まれます。</p>
   <h3>おぼえていること</h3>
   <p>会話の中で覚えたことです。違っていたら消してください。</p>
   <div id="factList"></div>

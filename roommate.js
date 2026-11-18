@@ -104,7 +104,7 @@
   const sleeping = () => sleepApplied;
   function syncSleep() {
     const want = awakeUntil < now() && isNight();
-    if (want && !sleepApplied) { sleepApplied = true; A.stopWalk(); clearAct(); A.setBaseFx(sleepFx); document.body.classList.add('sleeping'); }
+    if (want && !sleepApplied) { sleepApplied = true; A.stopWalk(); clearAct(); A.setBaseFx(sleepFx); A.setExpr('neutral'); document.body.classList.add('sleeping'); }
     else if (!want && sleepApplied) {
       sleepApplied = false; A.setBaseFx(null); document.body.classList.remove('sleeping');
       if (A.state.started && !A.state.selfie) say(pick(['ふぁ〜、おはよ…', 'ん…朝か…おはよう']), 'yes');
@@ -299,6 +299,7 @@
     await task(async () => { const ok = await A.walkWorld(wx, wfy); if (ok) say(pick(['呼んだ?', 'なになに?', 'はいはーい', 'お、どうした?']), 'greet'); });
   };
   A.hooks.walk = () => { cur = null; };
+  A.hooks.baseExpr = () => (!sleeping() && R.mood > 82) ? 'smile' : 'neutral'; // 機嫌がとてもいいときは、普段から笑顔
   A.hooks.shot = () => { touch(); bond(1); };
   A.hooks.selfiePose = () => { touch(); say(pick(['はい、チーズ!', 'いえーい!', 'かっこよく撮ってね!']), pick(['happy', 'greet', 'yes', 'dance'])); bond(2); };
   A.hooks.zoneChanged = () => { cur = null; nextAt = now() + 4000; say('おお、ここが僕の居場所ね', 'happy'); };
@@ -315,7 +316,8 @@
     // --- 返事待ちへの答え
     if (pending && pending.until > now()) {
       const p = pending, yes = /^(うん|はい|いいよ|お願い|頼む|オッケー|ok|もちろん|ぜひ|やる|やろう|する)/i.test(t), no = /^(いや|ううん|大丈夫|いい(よ|です)?$|やめとく|結構|いらない)/.test(t);
-      if (p.type === 'askName' && t.length <= 10 && !ask) { pending = null; R.userName = t.replace(/[。.!!です]/g, ''); $('userNameInput').value = R.userName; addFact('name', '名前は' + R.userName, 'name'); return { reply:`${R.userName}ね、覚えた!よろしく`, intent:'happy' }; }
+      const notName = /ありがと|こんにち|おはよ|こんばん|^うん|^はい|いいよ|よろしく|ごめん|すごい|かわいい|ただいま|おやすみ|なんで|いや|わからない/.test(t);
+      if (p.type === 'askName' && t.length <= 10 && !ask && !notName) { pending = null; R.userName = t.replace(/^(僕|俺|私|わたし|ぼく|おれ)は/, '').replace(/(です|だよ|って呼んで|でいい|で)$/, '').replace(/[。.!!]/g, ''); $('userNameInput').value = R.userName; addFact('name', '名前は' + R.userName, 'name'); return { reply:`${R.userName}ね、覚えた!よろしく`, intent:'happy' }; }
       if (yes && p.type === 'massage') { pending = null; return { reply:'じゃ、失礼して…', intent:'happy', after:massage }; }
       if (yes && p.type === 'snack') { pending = null; return { reply:'やった!どれにする?', intent:'happy', after:() => { menu(); snackMenu(); acts.hidden = false; } }; }
       if (yes && p.type === 'play') { pending = null; return { reply:'よし、勝負だ!', intent:'happy', after:janken }; }

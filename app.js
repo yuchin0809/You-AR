@@ -454,10 +454,20 @@
     const u = new SpeechSynthesisUtterance(text.replace(/[!!??〜…♪]/g, m => m === '…' ? '、' : m)); u.lang = 'ja-JP'; u.pitch = 1.15; speechSynthesis.speak(u);
   }
   // 返事をする:吹き出し + 声 + 動き
+  // 表情:うれしい場面では笑顔、それ以外は真顔。少したったら普段の表情に戻る
+  const SMILE = ['happy', 'greet', 'dance', 'eat', 'pet', 'bye'];
+  let exprTimer = 0;
+  const setExpr = e => state.three && state.three.setExpr && state.three.setExpr(e);
+  const baseExpr = () => hooks.baseExpr ? hooks.baseExpr() : 'neutral';
+  function emote(intent) {
+    if (!intent) return;
+    setExpr(SMILE.includes(intent) ? 'smile' : 'neutral');
+    clearTimeout(exprTimer); exprTimer = setTimeout(() => setExpr(baseExpr()), 4500);
+  }
   function say(reply, intent, opts = {}) {
     showBubble(reply, opts.summary || '', opts.ms || 6000);
     if (opts.voice !== false) speak(reply);
-    play(intent);
+    play(intent); emote(intent);
   }
   async function handle(text) {
     text = (text || '').trim(); if (!text) return;
@@ -510,7 +520,6 @@
       const name = (clip.name && clip.name !== 'mixamo.com' ? clip.name + ' ' : '') + label;
       motionPool.push({ name, clip, tags: tagsOf(name), src });
     }
-    $('motionCount').textContent = motionPool.length + '個登録済み';
   }
   const parseGLB = buf => lib().then(({ loader }) => new Promise((res, rej) => loader.parse(buf, '', res, rej)));
 
@@ -538,6 +547,10 @@
       const mixer = new T.AnimationMixer(model);
       const ctx = me.getContext('2d'), clock = new T.Clock();
       let current = null, idleAction = null, loopAction = null;
+      // 表情:頭のメッシュ(Head_neutral / Head_smile …)を切り替える
+      const faces = {}; model.traverse(o => { const m = /^Head_(\w+)$/.exec(o.name); if (m && o.isMesh) faces[m[1]] = o; });
+      const setExpr = e => { const k = faces[e] ? e : 'neutral'; for (const [n, o] of Object.entries(faces)) o.visible = n === k; };
+      setExpr('neutral');
       const make = clip => {
         // 他のモデル由来の動きを合わせる:Hipsの位置だけ縮尺を合わせ、その場で動かす。他の位置トラックは捨てる
         const c = clip.clone();
@@ -576,6 +589,7 @@
           if (!loopAction) return; const a = loopAction; loopAction = null;
           if (idleAction) { idleAction.reset().play(); a.crossFadeTo(idleAction, .3, false); current = idleAction; } else { a.fadeOut(.3); current = null; }
         },
+        setExpr,
         frame() {
           mixer.update(clock.getDelta());
           renderer.render(scene, cam);
@@ -596,38 +610,9 @@
       return false;
     }
   }
-  // persist: 次回から自動で読み込めるよう端末に保存する
-  async function loadFile(file, persist = true) {
-    if (!file) return false;
-    if (!/\.(glb|gltf)$/i.test(file.name)) { toast('3Dモデル(.glb)を選んでください'); return false; }
-    state.three = null;
-    const ok = await loadModel(file);
-    if (ok && persist) idb.set('model', { name:file.name, blob:file }).catch(() => toast('3Dモデルを端末に保存できませんでした(容量不足かも)'));
-    return ok;
-  }
-  async function addMotionFile(f) {
-    const gl = await parseGLB(await f.arrayBuffer());
-    addClips(gl.animations, f.name.replace(/\.[^.]+$/, ''));
-  }
-  $('motionFiles').onchange = async e => {
-    const saved = (await idb.get('motions').catch(() => null)) || [];
-    for (const f of e.target.files) {
-      try { await addMotionFile(f); saved.push({ name:f.name, blob:f }); }
-      catch (err) { toast(f.name + ' を読み込めません'); }
-    }
-    idb.set('motions', saved).catch(() => toast('モーションを端末に保存できませんでした'));
-    toast('モーションを追加しました');
-  };
-  $('clearMotions').onclick = () => {
-    for (let i = motionPool.length - 1; i >= 0; i--) if (motionPool[i].src !== 'model') motionPool.splice(i, 1);
-    $('motionCount').textContent = motionPool.length + '個登録済み';
-    idb.del('motions').catch(() => {}); toast('追加したモーションを消しました');
-  };
-
+  async function loadFile(file) { state.three = null; return loadModel(file); }
 
   /* ---------- UI ---------- */
-  $('file0').onchange = e => loadFile(e.target.files[0]);
-  $('file1').onchange = e => loadFile(e.target.files[0]);
   $('go').onclick = async () => {
     await enableMotion();
     try { await startCamera(); } catch (_) { return; }
@@ -643,22 +628,15 @@
   $('closePanel').onclick = () => { $('panel').hidden = true; };
   addEventListener('resize', () => render());
 
-  // リポジトリに me.glb があれば自動で読み込む
-  // 起動時:リポジトリの me.glb → 前回端末に保存した3Dモデル の順に探して自動で読み込む
+  // 起動時:あなたの3Dモデル(me.glb)を読み込む
   (async () => {
-    let loaded = false;
+    $('hint').textContent = 'あなたの3Dモデルを読み込み中…';
     try {
-      const r = await fetch('me.glb');
-      const b = r.ok ? await r.blob() : null;
-      const magic = b && b.size > 1000 ? new TextDecoder().decode(await b.slice(0, 4).arrayBuffer()) : '';
-      if (magic === 'glTF') loaded = await loadFile(new File([b], 'me.glb'), false);
-    } catch (_) {}
-    if (!loaded) {
-      const rec = await idb.get('model').catch(() => null);
-      if (rec && rec.blob) { loaded = await loadFile(new File([rec.blob], rec.name), false); if (loaded) $('hint').textContent = '前回の3Dモデルを読み込みました'; }
-    }
-    const ms = (await idb.get('motions').catch(() => null)) || [];
-    for (const m of ms) await addMotionFile(new File([m.blob], m.name)).catch(() => {});
+      const r = await fetch('me.glb'); if (!r.ok) throw new Error('me.glb が見つかりません');
+      const ok = await loadFile(new File([await r.blob()], 'me.glb'));
+      $('hint').textContent = ok ? '準備できました' : '3Dモデルを読み込めませんでした';
+    } catch (e) { $('hint').textContent = '3Dモデルを読み込めませんでした: ' + e.message; }
+    idb.del('model').catch(() => {}); idb.del('motions').catch(() => {}); // 以前のバージョンで保存したモデルは不要なので消す
   })();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); // 保存データが勝手に消されないよう依頼
 
@@ -666,6 +644,6 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 育成などの拡張用API
-  window.YouAR = { $, idb, state, hooks, zone, play, say, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render,
+  window.YouAR = { $, idb, state, hooks, zone, play, say, setExpr, emote, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render,
     walkWorld, stopWalk, placeAt, feet, toWorld, zoneRandom, zoneFront, inZone, runZoneSetup, llmJSON, ruleUnderstand, takeShot, TALK_INTENTS };
 })();

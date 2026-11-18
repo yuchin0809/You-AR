@@ -1,7 +1,7 @@
 /* You AR — Service Worker
  * ・オフラインでも起動できるようにファイルを端末にキャッシュする
  * ・アプリを閉じている間に育成状態を確かめて通知する(Periodic Background Sync。サーバー不要) */
-const CACHE = 'youar-v2';
+const CACHE = 'youar-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'roommate.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png', 'icons/maskable-512.png'];
 const CDN = 'https://cdn.jsdelivr.net/';
