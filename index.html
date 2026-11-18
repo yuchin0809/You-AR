@@ -23,6 +23,21 @@
   #bar input[type=range] { width:110px; accent-color:var(--accent); }
   #toast { position:fixed; top:calc(12px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); padding:8px 16px; border-radius:999px; font-size:.85rem; z-index:20; opacity:0; transition:opacity .25s; pointer-events:none; }
   #toast.show { opacity:1; }
+  #bubble { position:fixed; transform:translate(-50%,-100%); max-width:80vw; background:#fff; color:#111; border-radius:18px; padding:8px 14px; z-index:6; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.35); text-align:center; }
+  #bubble small { display:block; opacity:.55; font-size:.72rem; margin-bottom:2px; }
+  #bubble b { font-size:1.05rem; }
+  #chat { display:flex; gap:8px; width:100%; max-width:480px; margin:0 auto; }
+  #chat input { flex:1; min-width:0; border:0; border-radius:999px; padding:10px 16px; font-size:1rem; background:rgba(255,255,255,.92); color:#111; }
+  #bar #chat button { padding:10px 14px; }
+  #mic.on { background:#e11; animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity:.55; } }
+  #gear { position:fixed; top:calc(10px + env(safe-area-inset-top)); right:10px; z-index:8; display:none; padding:8px 12px; }
+  #panel { position:fixed; inset:0; z-index:15; background:rgba(10,10,20,.94); padding:20px; overflow:auto; }
+  #panel[hidden] { display:none; }
+  #panel h3 { margin:18px 0 6px; } #panel label.opt { display:block; margin:8px 0; line-height:1.5; }
+  #panel .clip { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:6px 0; font-size:.9rem; }
+  #panel .clip span.ok { color:#6f6; }
+  #panel p { opacity:.75; font-size:.85rem; margin:4px 0; }
   input[type=file] { display:none; }
 </style>
 </head>
@@ -41,6 +56,11 @@
 </div>
 
 <div id="bar">
+  <div id="chat">
+    <input id="text" type="text" placeholder="話しかける言葉を入力…" autocomplete="off" enterkeyhint="send">
+    <button id="send">送信</button>
+    <button id="mic" class="sub" title="音声で話しかける">🎤</button>
+  </div>
   <div class="row">
     <label class="range">背景除去 <input id="tol" type="range" min="0" max="120" value="40"></label>
     <label class="range"><input id="keyOn" type="checkbox" checked> 背景を消す</label>
@@ -55,6 +75,17 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="bubble" hidden></div>
+<button id="gear" class="sub">⚙ 設定</button>
+<div id="panel" hidden>
+  <h3>設定</h3>
+  <label class="opt"><input id="tts" type="checkbox" checked> 声で返事する(端末の音声合成)</label>
+  <label class="opt"><input id="llm" type="checkbox"> AIで理解・要約する(WebLLM。初回のみ約1GBをダウンロード。WebGPU対応の端末向け)</label>
+  <h3>動作ごとの動画(任意)</h3>
+  <p>登録しない動作は、今の写真・動画を動かして表現します。動画は再生後に元の姿勢へ戻ります。背景は同じ色で撮ってください。</p>
+  <div id="clipList"></div>
+  <p style="margin-top:18px"><button id="closePanel">閉じる</button></p>
+</div>
 
 <script>
 (() => {
@@ -62,6 +93,8 @@
   const video = $('video'), stage = $('stage'), me = $('me');
   const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', src:null, cut:null, stream:null };
   let baseW = 0, baseH = 0;
+  state.fx = { dx:0, dy:0, rot:0, sc:1, sy:1 }; state.idleVid = null; state.clips = {};
+  const bubble = $('bubble');
 
   const toast = msg => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),2200); };
 
@@ -70,12 +103,12 @@
   function loadFile(file) {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    if (state.vid) { state.vid.pause(); state.vid = null; }
+    if (state.vid) { state.vid.pause(); state.vid = null; } state.idleVid = null;
     state.src = null;
     if (file.type.startsWith('video')) {
       const v = document.createElement('video');
       v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', '');
-      v.onloadeddata = () => { v.play().catch(()=>{}); state.vid = v; setSource(v.videoWidth, v.videoHeight, 720); keyFrame(v); $('go').disabled = false; $('hint').textContent = '動画を読み込みました'; };
+      v.onloadeddata = () => { v.play().catch(()=>{}); state.vid = v; state.idleVid = v; setSource(v.videoWidth, v.videoHeight, 720); keyFrame(v); $('go').disabled = false; $('hint').textContent = '動画を読み込みました'; };
       v.src = url;
     } else {
       const img = new Image();
@@ -132,7 +165,15 @@
   function render() {
     const ox = state.anchorOn ? state.ax : 0, oy = state.anchorOn ? state.ay : 0;
     me.style.display = 'block';
-    me.style.transform = `translate(${state.x + ox - baseW/2}px, ${state.y + oy - baseH/2}px) rotate(${state.r}rad) scale(${state.s * state.flip}, ${state.s})`;
+    const f = state.fx;
+    me.style.transform = `translate(${state.x + ox + f.dx - baseW/2}px, ${state.y + oy + f.dy - baseH/2}px) rotate(${state.r + f.rot}rad) scale(${state.s * state.flip * f.sc}, ${state.s * f.sc * f.sy})`;
+    moveBubble();
+  }
+  function moveBubble() {
+    if (bubble.hidden) return;
+    const ox = state.anchorOn ? state.ax : 0, oy = state.anchorOn ? state.ay : 0;
+    bubble.style.left = Math.min(innerWidth - 20, Math.max(20, state.x + ox)) + 'px';
+    bubble.style.top = Math.max(80, state.y + oy + state.fx.dy - baseH * state.s / 2 - 8) + 'px';
   }
 
   const ptrs = new Map(); let last = null;
@@ -192,7 +233,7 @@
   $('go').onclick = async () => {
     await enableMotion();
     try { await startCamera(); } catch (_) { return; }
-    $('start').style.display = 'none'; $('bar').style.display = 'flex';
+    $('start').style.display = 'none'; $('bar').style.display = 'flex'; $('gear').style.display = 'block';
     place(); render(); toast('ドラッグで移動 / 2本指で拡大・回転');
   };
   $('flip').onclick = async () => { state.facing = state.facing === 'environment' ? 'user' : 'environment'; await startCamera(); };
@@ -210,13 +251,160 @@
     g.drawImage(video, (W - vw * k) / 2, (H - vh * k) / 2, vw * k, vh * k);
     g.restore();
     const ox = state.anchorOn ? state.ax : 0, oy = state.anchorOn ? state.ay : 0;
-    g.translate(state.x + ox, state.y + oy); g.rotate(state.r); g.scale(state.s * state.flip, state.s);
+    const f = state.fx; g.translate(state.x + ox + f.dx, state.y + oy + f.dy); g.rotate(state.r + f.rot); g.scale(state.s * state.flip * f.sc, state.s * f.sc * f.sy);
     g.drawImage(state.cut, -baseW / 2, -baseH / 2, baseW, baseH);
     out.toBlob(b => {
       const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'you-ar.png'; a.click();
       toast('保存しました');
     }, 'image/png');
   };
+
+
+  /* ---------- 会話:聞き取り → 理解 → 動作 ---------- */
+  const MOTIONS = {
+    greet:'あいさつ', happy:'喜ぶ', sad:'悲しむ', bye:'バイバイ',
+    yes:'うなずく', no:'首を振る', surprise:'驚く', dance:'踊る'
+  };
+  const FX0 = () => ({ dx:0, dy:0, rot:0, sc:1, sy:1 });
+  const env = (t, a = .15) => t < a ? t / a : t > 1 - a ? (1 - t) / a : 1;
+  const ANIMS = {
+    greet:    { d:1600, f:t => ({ rot:Math.sin(t*Math.PI*6)*.12*(1-t), dy:-Math.abs(Math.sin(t*Math.PI*2))*20 }) },
+    happy:    { d:1400, f:t => ({ dy:-Math.abs(Math.sin(t*Math.PI*3))*60, sy:1+Math.sin(t*Math.PI*6)*.03 }) },
+    sad:      { d:2200, f:t => { const k = env(t, .25); return { dy:30*k, sy:1-.06*k, rot:.05*k }; } },
+    bye:      { d:1800, f:t => ({ rot:Math.sin(t*Math.PI*8)*.15*(1-t) }) },
+    yes:      { d:1200, f:t => { const k = Math.abs(Math.sin(t*Math.PI*3)); return { dy:k*18, sy:1-k*.04 }; } },
+    no:       { d:1200, f:t => ({ dx:Math.sin(t*Math.PI*6)*25*(1-t) }) },
+    surprise: { d:900,  f:t => ({ sc:1+Math.sin(t*Math.PI)*.18, dy:-Math.sin(t*Math.PI)*25 }) },
+    dance:    { d:3000, f:t => ({ dx:Math.sin(t*Math.PI*6)*40, rot:Math.sin(t*Math.PI*6)*.1, dy:-Math.abs(Math.sin(t*Math.PI*6))*25 }) },
+  };
+  let animRaf = 0;
+  function runAnim(id) {
+    const A = ANIMS[id] || ANIMS.yes, t0 = performance.now();
+    cancelAnimationFrame(animRaf);
+    const step = now => {
+      const t = Math.min(1, (now - t0) / A.d);
+      state.fx = Object.assign(FX0(), t < 1 ? A.f(t) : {});
+      render();
+      if (t < 1) animRaf = requestAnimationFrame(step);
+    };
+    animRaf = requestAnimationFrame(step);
+  }
+  function play(id) {
+    const clip = state.clips[id];
+    if (clip) {
+      state.vid = clip; clip.currentTime = 0; clip.play().catch(() => {});
+      clip.onended = () => {
+        state.vid = state.idleVid;
+        if (state.idleVid) state.idleVid.play().catch(() => {}); else if (state.src) keyFrame(state.src);
+      };
+    } else runAnim(id);
+  }
+
+  // キーワードによる理解(AIを使わない標準モード。オフライン・即時)
+  const RULES = [
+    { id:'greet',    reply:'こんにちは!', words:['こんにちは','こんばんは','おはよう','やあ','ハロー','はじめまして','hello','hi'] },
+    { id:'happy',    reply:'ありがとう!うれしい!', words:['ありがとう','嬉しい','うれしい','最高','すごい','やった','好き','かわいい','かっこいい','おめでとう'] },
+    { id:'sad',      reply:'そっか…元気出してね', words:['悲しい','かなしい','つらい','辛い','疲れ','落ち込','さみしい','寂しい','泣'] },
+    { id:'bye',      reply:'またね!', words:['バイバイ','ばいばい','さようなら','またね','じゃあね','おやすみ'] },
+    { id:'no',       reply:'ううん、違うよ', words:['いいえ','だめ','ダメ','違う','ちがう','やだ','嫌','いらない'] },
+    { id:'surprise', reply:'えっ!?', words:['えっ','びっくり','まじ','本当','ほんと','うそ','嘘'] },
+    { id:'dance',    reply:'見てて!踊るよ!', words:['踊','おどっ','ダンス','dance'] },
+    { id:'yes',      reply:'うんうん', words:['はい','うん','そうだね','いいよ','オッケー','ok','了解','お願い'] },
+  ];
+  function ruleUnderstand(text) {
+    const t = text.toLowerCase(); let best = null, bestN = 0;
+    for (const r of RULES) { const n = r.words.filter(w => t.includes(w.toLowerCase())).length; if (n > bestN) { best = r; bestN = n; } }
+    const summary = text.length > 20 ? text.slice(0, 20) + '…' : text;
+    return best ? { intent:best.id, reply:best.reply, summary } : { intent:'yes', reply:'そうなんだ', summary };
+  }
+
+  // 任意:ブラウザ内AI(WebLLM)で要約して返事を考える。端末内で動くので無料・外部送信なし
+  let engine = null, engineLoading = null;
+  function getEngine() {
+    if (engine) return Promise.resolve(engine);
+    if (!navigator.gpu) return Promise.reject(new Error('この端末はWebGPUに未対応です'));
+    if (!engineLoading) engineLoading = (async () => {
+      const { CreateMLCEngine } = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm');
+      engine = await CreateMLCEngine('Qwen2.5-1.5B-Instruct-q4f16_1-MLC', {
+        initProgressCallback: p => showBubble('AIを準備中… ' + Math.round(p.progress * 100) + '%', '初回のみ時間がかかります', 600000)
+      });
+      return engine;
+    })().catch(e => { engineLoading = null; throw e; });
+    return engineLoading;
+  }
+  async function llmUnderstand(text) {
+    try {
+      const e = await getEngine();
+      const r = await e.chat.completions.create({
+        temperature: .3, max_tokens: 120,
+        messages: [
+          { role:'system', content:'あなたは話しかけられた親しみやすいキャラクターです。相手の発話を15字以内で要約し、動作ラベルを1つ選び、20字以内の短い日本語の返事を考えてください。JSONのみ出力: {"summary":"","intent":"","reply":""}。intentは次のいずれか: ' + Object.keys(ANIMS).join(',') },
+          { role:'user', content:text }
+        ]
+      });
+      const m = r.choices[0].message.content.match(/\{[\s\S]*\}/);
+      const j = JSON.parse(m[0]);
+      return { intent: ANIMS[j.intent] ? j.intent : 'yes', reply: String(j.reply || 'うん'), summary: String(j.summary || text) };
+    } catch (err) {
+      toast('AI理解に失敗したので簡易判定にします: ' + (err.message || err)); $('llm').checked = false; return null;
+    }
+  }
+
+  function showBubble(reply, summary, ms = 6000) {
+    bubble.textContent = '';
+    if (summary) { const sm = document.createElement('small'); sm.textContent = summary; bubble.append(sm); }
+    const b = document.createElement('b'); b.textContent = reply; bubble.append(b);
+    bubble.hidden = false; moveBubble();
+    clearTimeout(showBubble.t); showBubble.t = setTimeout(() => { bubble.hidden = true; }, ms);
+  }
+  function speak(text) {
+    if (!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang = 'ja-JP'; speechSynthesis.speak(u);
+  }
+  async function handle(text) {
+    text = (text || '').trim(); if (!text) return;
+    showBubble('…', '「' + text + '」');
+    let r = null;
+    if ($('llm').checked) r = await llmUnderstand(text);
+    if (!r) r = ruleUnderstand(text);
+    showBubble(r.reply, '「' + r.summary + '」');
+    if ($('tts').checked) speak(r.reply);
+    play(r.intent);
+  }
+
+  // 入力欄 / マイク
+  const sendText = () => { const t = $('text'); const v = t.value; t.value = ''; handle(v); };
+  $('send').onclick = sendText;
+  $('text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) sendText(); });
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  $('mic').onclick = () => {
+    if (!SR) { toast('このブラウザは音声認識に未対応です。入力欄を使ってください'); return; }
+    if (rec) { rec.stop(); return; }
+    rec = new SR(); rec.lang = 'ja-JP'; rec.interimResults = false;
+    rec.onresult = e => handle(e.results[0][0].transcript);
+    rec.onerror = e => toast('音声認識エラー: ' + e.error);
+    rec.onend = () => { rec = null; $('mic').classList.remove('on'); };
+    rec.start(); $('mic').classList.add('on'); toast('話しかけてください');
+  };
+
+  // 設定パネル / 動作ごとの動画登録
+  $('gear').onclick = () => { $('panel').hidden = false; };
+  $('closePanel').onclick = () => { $('panel').hidden = true; };
+  for (const [id, label] of Object.entries(MOTIONS)) {
+    const row = document.createElement('div'); row.className = 'clip';
+    row.innerHTML = '<span></span><span><label class="btn sub" style="padding:8px 14px;font-size:.85rem">動画を選ぶ<input type="file" accept="video/*"></label> <button class="sub" style="padding:8px 14px;font-size:.85rem">試す</button></span>';
+    const [nameEl, ctl] = row.children; nameEl.textContent = label;
+    const input = row.querySelector('input'), test = row.querySelector('button');
+    input.onchange = () => {
+      const f = input.files[0]; if (!f) return;
+      const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+      v.src = URL.createObjectURL(f); state.clips[id] = v; nameEl.textContent = label + ' ✓';
+    };
+    test.onclick = () => { $('panel').hidden = true; play(id); };
+    $('clipList').append(row);
+  }
 
   // リポジトリに me.png があれば自動で読み込む
   fetch('me.png').then(r => r.ok ? r.blob() : null).then(b => { if (b && b.type.startsWith('image')) loadFile(b); }).catch(() => {});
