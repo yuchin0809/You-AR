@@ -1,1 +1,12 @@
-{"cli":{"version":">= 16.0.0","appVersionSource":"remote"},"build":{"production":{"autoIncrement":true}},"submit":{"production":{}}}
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "development" }
+    },
+    "production": { "autoIncrement": true }
+  },
+  "submit": { "production": {} }
+}
