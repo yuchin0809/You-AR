@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "You AR",
+    "slug": "you-ar",
+    "owner": "yuuuu21412",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b0b14",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yuchin0809.youar",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "部屋の床を認識して、3Dのルームメイトを表示するためにカメラを使います。映像は端末の外に送信されません。",
+        "NSMicrophoneUsageDescription": "声で話しかけるためにマイクを使います。",
+        "NSSpeechRecognitionUsageDescription": "話しかけた言葉を文字にするために音声認識を使います。"
+      }
+    },
+    "plugins": [
+      [
+        "@reactvision/react-viro",
+        {
+          "provider": "none",
+          "telemetry": false,
+          "ios": {
+            "cameraUsagePermission": "部屋の床を認識して、3Dのルームメイトを表示するためにカメラを使います。映像は端末の外に送信されません。",
+            "microphoneUsagePermission": "声で話しかけるためにマイクを使います。"
+          }
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "声で話しかけるためにマイクを使います。",
+          "speechRecognitionPermission": "話しかけた言葉を文字にするために音声認識を使います。"
+        }
+      ],
+      "expo-notifications"
+    ]
+  }
+}
