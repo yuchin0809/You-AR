@@ -3,466 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0b14">
 <title>You AR</title>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
-<style>
-  :root { --accent:#ff4f81; }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { margin:0; height:100%; background:#000; color:#fff; font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif; overflow:hidden; overscroll-behavior:none; }
-  #video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; background:#111; }
-  #stage { position:fixed; inset:0; touch-action:none; }
-  #me { position:absolute; left:0; top:0; transform-origin:50% 50%; max-width:none; user-select:none; -webkit-user-drag:none; pointer-events:none; display:none; filter:drop-shadow(0 8px 12px rgba(0,0,0,.35)); }
-  #start { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:24px; text-align:center; background:linear-gradient(160deg,#1b1030,#0b0b14); z-index:10; }
-  #start h1 { margin:0; font-size:2.4rem; letter-spacing:.04em; }
-  #start p { margin:0; opacity:.8; line-height:1.6; max-width:30em; }
-  button, label.btn { appearance:none; border:0; border-radius:999px; padding:14px 22px; font-size:1rem; font-weight:600; color:#fff; background:var(--accent); cursor:pointer; display:inline-block; }
-  button:disabled { opacity:.4; cursor:not-allowed; }
-  button.sub, label.sub { background:rgba(255,255,255,.16); backdrop-filter:blur(8px); }
-  #bar { position:fixed; left:0; right:0; bottom:0; padding:12px 12px calc(12px + env(safe-area-inset-bottom)); display:none; flex-direction:column; gap:10px; background:linear-gradient(transparent,rgba(0,0,0,.6)); z-index:5; }
-  #bar .row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; align-items:center; }
-  #bar button, #bar label.btn { padding:10px 16px; font-size:.9rem; }
-  #bar .range { display:flex; align-items:center; gap:8px; font-size:.8rem; background:rgba(255,255,255,.16); border-radius:999px; padding:6px 14px; }
-  #bar input[type=range] { width:110px; accent-color:var(--accent); }
-  #toast { position:fixed; top:calc(12px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); padding:8px 16px; border-radius:999px; font-size:.85rem; z-index:20; opacity:0; transition:opacity .25s; pointer-events:none; }
-  #toast.show { opacity:1; }
-  #bubble { position:fixed; transform:translate(-50%,-100%); max-width:80vw; background:#fff; color:#111; border-radius:18px; padding:8px 14px; z-index:6; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.35); text-align:center; }
-  #bubble small { display:block; opacity:.55; font-size:.72rem; margin-bottom:2px; }
-  #bubble b { font-size:1.05rem; }
-  #chat { display:flex; gap:8px; width:100%; max-width:480px; margin:0 auto; }
-  #chat input { flex:1; min-width:0; border:0; border-radius:999px; padding:10px 16px; font-size:1rem; background:rgba(255,255,255,.92); color:#111; }
-  #bar #chat button { padding:10px 14px; }
-  #mic.on { background:#e11; animation:pulse 1s infinite; }
-  @keyframes pulse { 50% { opacity:.55; } }
-  #gear { position:fixed; top:calc(10px + env(safe-area-inset-top)); right:10px; z-index:8; display:none; padding:8px 12px; }
-  #panel { position:fixed; inset:0; z-index:15; background:rgba(10,10,20,.94); padding:20px; overflow:auto; }
-  #panel[hidden] { display:none; }
-  #panel h3 { margin:18px 0 6px; } #panel label.opt { display:block; margin:8px 0; line-height:1.5; }
-  #panel p { opacity:.75; font-size:.85rem; margin:4px 0; }
-  input[type=file] { display:none; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <video id="video" playsinline muted autoplay></video>
 <div id="stage"><canvas id="me"></canvas></div>
+<div id="fxLayer"></div>
 
+<!-- ステータス -->
+<div id="hud" hidden>
+  <div class="hudTop"><b id="hudName">ぼく</b><span id="hudLv">Lv1</span></div>
+  <div class="hudSub" id="hudSub"></div>
+  <div class="stat" title="おなか"><span>🍙</span><i><em id="barHunger"></em></i></div>
+  <div class="stat" title="きげん"><span>😊</span><i><em id="barMood"></em></i></div>
+  <div class="stat" title="げんき"><span>⚡</span><i><em id="barEnergy"></em></i></div>
+  <div class="stat" title="なかよし(次のレベルまで)"><span>💗</span><i><em id="barBond"></em></i></div>
+</div>
+
+<!-- 開始画面 -->
 <div id="start">
   <h1>You AR</h1>
-  <p>カメラ越しの世界に、あなたの3Dモデルを登場させます。<br>
+  <p>カメラ越しの世界で、3Dの「あなた」と一緒に暮らそう。<br>
+     ごはんをあげたり、なでたり、話しかけたり、一緒に自撮りしたり。<br>
      骨格付きの3Dモデル(.glb)を選んで、カメラを起動してください。映像は端末の外に送信されません。</p>
   <label class="btn sub" for="file0">① 自分の3Dモデル(.glb)を選ぶ</label>
   <input id="file0" type="file" accept=".glb,.gltf">
   <button id="go" disabled>② ARを始める</button>
-  <p id="hint" style="font-size:.85rem"></p>
+  <p id="hint" class="small"></p>
 </div>
 
+<!-- 下のバー -->
 <div id="bar">
+  <div id="tray" class="row" hidden></div>
   <div id="chat">
     <input id="text" type="text" placeholder="話しかける言葉を入力…" autocomplete="off" enterkeyhint="send">
     <button id="send">送信</button>
     <button id="mic" class="sub" title="音声で話しかける">🎤</button>
   </div>
   <div class="row">
-    <label class="range"><input id="anchor" type="checkbox" checked> 空間に固定</label>
-  </div>
-  <div class="row">
-    <label class="btn sub" for="file1">3Dモデル変更</label>
-    <input id="file1" type="file" accept=".glb,.gltf">
-    <button class="sub" id="flip">カメラ切替</button>
-    <button class="sub" id="mirror">左右反転</button>
+    <button class="sub" id="feedBtn">🍙 ごはん</button>
+    <button class="sub" id="sleepBtn">💤 おやすみ</button>
+    <button class="sub" id="selfieBtn">🤳 自撮り</button>
     <button id="shot">📷 撮影</button>
   </div>
 </div>
+
+<!-- 自撮りモード -->
+<div id="selfieUI" hidden>
+  <button class="sub" id="selfieExit">← もどる</button>
+  <button id="selfieShot" class="shutter" aria-label="撮影"></button>
+  <span class="small">2本指で僕を動かせるよ</span>
+</div>
+<div id="count"></div>
+<div id="flash"></div>
+
 <div id="toast"></div>
 <div id="bubble" hidden></div>
-<button id="gear" class="sub">⚙ 設定</button>
+<button id="gear" class="sub">⚙</button>
+
+<!-- 設定 -->
 <div id="panel" hidden>
-  <h3>設定</h3>
+  <h3>なまえ</h3>
+  <p><input id="nameInput" type="text" maxlength="12" class="field" placeholder="ぼく"></p>
+  <h3>操作</h3>
+  <p>1本指でなでる・タップでつつく / 2本指で移動・拡大・回転 / 何もない所をダブルタップでそこへ移動</p>
+  <h3>表示</h3>
+  <label class="opt"><input id="anchor" type="checkbox" checked> 空間に固定(ジャイロ)</label>
+  <p><button class="sub" id="flip">カメラ切替</button> <button class="sub" id="mirror">左右反転</button></p>
+  <h3>返事</h3>
   <label class="opt"><input id="tts" type="checkbox" checked> 声で返事する(端末の音声合成)</label>
+  <label class="opt"><input id="chatter" type="checkbox" checked> ときどき自分から話しかけてくる</label>
   <label class="opt"><input id="llm" type="checkbox"> AIで理解・要約する(WebLLM。初回のみ約1GBをダウンロード。WebGPU対応の端末向け)</label>
+  <h3>3Dモデル</h3>
+  <p><label class="btn sub" for="file1">3Dモデル変更</label><input id="file1" type="file" accept=".glb,.gltf"></p>
   <h3>3Dモーション(.glb、複数選択可)</h3>
-  <p>Mixamoなどで書き出した動き(骨格付き.glb)を選びます。ファイル名に dance / wave / happy / sad / nod / shake / surprise などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
-  <p><label class="btn sub" style="padding:8px 14px;font-size:.85rem">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
-  <p>動きを登録しなくても、話しかけると3Dモデルが跳ねる・傾くなどの簡単な動きで反応します。</p>
-  <p style="margin-top:18px"><button id="closePanel">閉じる</button></p>
+  <p>Mixamoなどで書き出した動き(骨格付き.glb)。ファイル名に dance / wave / happy / sad / nod / shake / surprise / eat / idle などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
+  <p><label class="btn sub">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
+  <h3>データ</h3>
+  <p>育成データはこの端末のブラウザに保存されます。</p>
+  <p><button class="sub danger" id="resetBtn">育成データをリセット</button></p>
+  <p style="margin-top:22px"><button id="closePanel">閉じる</button></p>
 </div>
 
-<script>
-(() => {
-  const $ = id => document.getElementById(id);
-  const video = $('video'), stage = $('stage'), me = $('me');
-  const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', cut:null, stream:null };
-  let baseW = 0, baseH = 0;
-  state.fx = { dx:0, dy:0, rot:0, sc:1, sy:1 };
-  const bubble = $('bubble');
-
-  const toast = msg => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),2200); };
-
-  /* ---------- 3Dモデルの読み込み ---------- */
-  function loadFile(file) {
-    if (!file) return;
-    if (!/\.(glb|gltf)$/i.test(file.name)) { toast('3Dモデル(.glb)を選んでください'); return; }
-    state.three = null; loadModel(file);
-  }
-  function setSource(w, h, max) {
-    const k = Math.min(1, max / Math.max(w, h));
-    me.width = Math.round(w * k); me.height = Math.round(h * k);
-    baseH = Math.min(innerHeight * 0.6, me.height); baseW = baseH * me.width / me.height;
-    me.style.width = baseW + 'px'; me.style.height = baseH + 'px';
-    if (!me.dataset.placed) { place(); me.dataset.placed = 1; }
-    render();
-  }
-  state.cut = me;
-  (function loop() {
-    if (state.three) state.three.frame();
-    requestAnimationFrame(loop);
-  })();
-
-  /* ---------- カメラ ---------- */
-  async function startCamera() {
-    if (state.stream) state.stream.getTracks().forEach(t => t.stop());
-    try {
-      state.stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:state.facing, width:{ideal:1920}, height:{ideal:1080} }, audio:false });
-    } catch (e) {
-      toast('カメラを起動できません: ' + (e.message || e.name)); throw e;
-    }
-    video.srcObject = state.stream;
-    video.style.transform = state.facing === 'user' ? 'scaleX(-1)' : '';
-    await video.play().catch(()=>{});
-  }
-
-  /* ---------- 配置 & ジェスチャ ---------- */
-  function place() { state.x = innerWidth / 2; state.y = innerHeight * 0.55; state.s = 1; state.r = 0; refAnchor(); }
-  function render() {
-    const ox = state.anchorOn ? state.ax : 0, oy = state.anchorOn ? state.ay : 0;
-    me.style.display = 'block';
-    const f = state.fx;
-    me.style.transform = `translate(${state.x + ox + f.dx - baseW/2}px, ${state.y + oy + f.dy - baseH/2}px) rotate(${state.r + f.rot}rad) scale(${state.s * state.flip * f.sc}, ${state.s * f.sc * f.sy})`;
-    moveBubble();
-  }
-  function moveBubble() {
-    if (bubble.hidden) return;
-    const ox = state.anchorOn ? state.ax : 0, oy = state.anchorOn ? state.ay : 0;
-    bubble.style.left = Math.min(innerWidth - 20, Math.max(20, state.x + ox)) + 'px';
-    bubble.style.top = Math.max(80, state.y + oy + state.fx.dy - baseH * state.s / 2 - 8) + 'px';
-  }
-
-  const ptrs = new Map(); let last = null;
-  stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, e); last = null; });
-  stage.addEventListener('pointermove', e => {
-    if (!ptrs.has(e.pointerId)) return;
-    const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, e);
-    if (ptrs.size === 1) {
-      state.x += e.clientX - prev.clientX; state.y += e.clientY - prev.clientY;
-    } else if (ptrs.size === 2) {
-      const [a, b] = [...ptrs.values()];
-      const dist = Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY), ang = Math.atan2(b.clientY-a.clientY, b.clientX-a.clientX);
-      if (last) { state.s = Math.min(6, Math.max(0.1, state.s * dist / last.dist)); state.r += ang - last.ang; }
-      last = { dist, ang };
-    }
-    render();
-  });
-  const up = e => { ptrs.delete(e.pointerId); last = null; };
-  stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
-  stage.addEventListener('wheel', e => { e.preventDefault(); state.s = Math.min(6, Math.max(0.1, state.s * (e.deltaY < 0 ? 1.08 : 0.92))); render(); }, { passive:false });
-
-  /* ---------- ジャイロで空間に固定 ---------- */
-  const HFOV = 60; // 想定する水平画角(度)
-  state.anchorOn = true; state.ax = 0; state.ay = 0;
-  let ori = null, ref = null;
-  function refAnchor() { ref = ori ? { ...ori } : null; state.ax = state.ay = 0; }
-  const wrap = d => ((d + 540) % 360) - 180;
-  function onOrient(e) {
-    if (e.alpha == null) return;
-    const heading = e.webkitCompassHeading != null ? 360 - e.webkitCompassHeading : e.alpha;
-    ori = { yaw: heading, pitch: e.beta };
-    if (!ref) ref = { ...ori };
-    const ppd = innerWidth / HFOV;
-    state.ax = wrap(ori.yaw - ref.yaw) * ppd;           // 右へ向く→被写体は左へ
-    state.ay = (ori.pitch - ref.pitch) * ppd;            // 上へ向ける→被写体は下へ
-    if (state.anchorOn) render();
-  }
-  async function enableMotion() {
-    try {
-      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted') return;
-      }
-      addEventListener('deviceorientation', onOrient, true);
-    } catch (_) {}
-  }
-  // 固定ONにしたとき、現在位置を基準に取り直す
-  $('anchor').onchange = e => {
-    if (!e.target.checked) { state.x += state.ax; state.y += state.ay; }
-    else { state.x -= 0; }
-    state.anchorOn = e.target.checked; refAnchor(); render();
-  };
-
-  /* ---------- UI ---------- */
-  $('file0').onchange = e => loadFile(e.target.files[0]);
-  $('file1').onchange = e => loadFile(e.target.files[0]);
-  $('go').onclick = async () => {
-    await enableMotion();
-    try { await startCamera(); } catch (_) { return; }
-    $('start').style.display = 'none'; $('bar').style.display = 'flex'; $('gear').style.display = 'block';
-    place(); render(); toast('ドラッグで移動 / 2本指で拡大・回転');
-  };
-  $('flip').onclick = async () => { state.facing = state.facing === 'environment' ? 'user' : 'environment'; await startCamera(); };
-  $('mirror').onclick = () => { state.flip *= -1; render(); };
-  addEventListener('resize', () => { if (baseH) render(); });
-
-  /* ---------- 撮影 ---------- */
-  $('shot').onclick = () => {
-    const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return;
-    const W = innerWidth, H = innerHeight, k = Math.max(W / vw, H / vh);
-    const out = document.createElement('canvas'), S = 2; out.width = W * S; out.height = H * S;
-    const g = out.getContext('2d'); g.scale(S, S);
-    g.save();
-    if (state.facing === 'user') { g.translate(W, 0); g.scale(-1, 1); }
-    g.drawImage(video, (W - vw * k) / 2, (H - vh * k) / 2, vw * k, vh * k);
-    g.restore();
-    const ox = state.anchorOn ? state.ax : 0, oy = state.anchorOn ? state.ay : 0;
-    const f = state.fx; g.translate(state.x + ox + f.dx, state.y + oy + f.dy); g.rotate(state.r + f.rot); g.scale(state.s * state.flip * f.sc, state.s * f.sc * f.sy);
-    g.drawImage(state.cut, -baseW / 2, -baseH / 2, baseW, baseH);
-    out.toBlob(b => {
-      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'you-ar.png'; a.click();
-      toast('保存しました');
-    }, 'image/png');
-  };
-
-
-  /* ---------- 会話:聞き取り → 理解 → 動作 ---------- */
-  const FX0 = () => ({ dx:0, dy:0, rot:0, sc:1, sy:1 });
-  const env = (t, a = .15) => t < a ? t / a : t > 1 - a ? (1 - t) / a : 1;
-  const ANIMS = {
-    greet:    { d:1600, f:t => ({ rot:Math.sin(t*Math.PI*6)*.12*(1-t), dy:-Math.abs(Math.sin(t*Math.PI*2))*20 }) },
-    happy:    { d:1400, f:t => ({ dy:-Math.abs(Math.sin(t*Math.PI*3))*60, sy:1+Math.sin(t*Math.PI*6)*.03 }) },
-    sad:      { d:2200, f:t => { const k = env(t, .25); return { dy:30*k, sy:1-.06*k, rot:.05*k }; } },
-    bye:      { d:1800, f:t => ({ rot:Math.sin(t*Math.PI*8)*.15*(1-t) }) },
-    yes:      { d:1200, f:t => { const k = Math.abs(Math.sin(t*Math.PI*3)); return { dy:k*18, sy:1-k*.04 }; } },
-    no:       { d:1200, f:t => ({ dx:Math.sin(t*Math.PI*6)*25*(1-t) }) },
-    surprise: { d:900,  f:t => ({ sc:1+Math.sin(t*Math.PI)*.18, dy:-Math.sin(t*Math.PI)*25 }) },
-    dance:    { d:3000, f:t => ({ dx:Math.sin(t*Math.PI*6)*40, rot:Math.sin(t*Math.PI*6)*.1, dy:-Math.abs(Math.sin(t*Math.PI*6))*25 }) },
-  };
-  let animRaf = 0;
-  function runAnim(id) {
-    const A = ANIMS[id] || ANIMS.yes, t0 = performance.now();
-    cancelAnimationFrame(animRaf);
-    const step = now => {
-      const t = Math.min(1, (now - t0) / A.d);
-      state.fx = Object.assign(FX0(), t < 1 ? A.f(t) : {});
-      render();
-      if (t < 1) animRaf = requestAnimationFrame(step);
-    };
-    animRaf = requestAnimationFrame(step);
-  }
-  function play(id) {
-    if (state.three && state.three.play(id)) return;
-    runAnim(id);
-  }
-
-  // キーワードによる理解(AIを使わない標準モード。オフライン・即時)
-  const RULES = [
-    { id:'greet',    reply:'こんにちは!', words:['こんにちは','こんばんは','おはよう','やあ','ハロー','はじめまして','hello','hi'] },
-    { id:'happy',    reply:'ありがとう!うれしい!', words:['ありがとう','嬉しい','うれしい','最高','すごい','やった','好き','かわいい','かっこいい','おめでとう'] },
-    { id:'sad',      reply:'そっか…元気出してね', words:['悲しい','かなしい','つらい','辛い','疲れ','落ち込','さみしい','寂しい','泣'] },
-    { id:'bye',      reply:'またね!', words:['バイバイ','ばいばい','さようなら','またね','じゃあね','おやすみ'] },
-    { id:'no',       reply:'ううん、違うよ', words:['いいえ','だめ','ダメ','違う','ちがう','やだ','嫌','いらない'] },
-    { id:'surprise', reply:'えっ!?', words:['えっ','びっくり','まじ','本当','ほんと','うそ','嘘'] },
-    { id:'dance',    reply:'見てて!踊るよ!', words:['踊','おどっ','ダンス','dance'] },
-    { id:'yes',      reply:'うんうん', words:['はい','うん','そうだね','いいよ','オッケー','ok','了解','お願い'] },
-  ];
-  function ruleUnderstand(text) {
-    const t = text.toLowerCase(); let best = null, bestN = 0;
-    for (const r of RULES) { const n = r.words.filter(w => t.includes(w.toLowerCase())).length; if (n > bestN) { best = r; bestN = n; } }
-    const summary = text.length > 20 ? text.slice(0, 20) + '…' : text;
-    return best ? { intent:best.id, reply:best.reply, summary } : { intent:'yes', reply:'そうなんだ', summary };
-  }
-
-  // 任意:ブラウザ内AI(WebLLM)で要約して返事を考える。端末内で動くので無料・外部送信なし
-  let engine = null, engineLoading = null;
-  function getEngine() {
-    if (engine) return Promise.resolve(engine);
-    if (!navigator.gpu) return Promise.reject(new Error('この端末はWebGPUに未対応です'));
-    if (!engineLoading) engineLoading = (async () => {
-      const { CreateMLCEngine } = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm');
-      engine = await CreateMLCEngine('Qwen2.5-1.5B-Instruct-q4f16_1-MLC', {
-        initProgressCallback: p => showBubble('AIを準備中… ' + Math.round(p.progress * 100) + '%', '初回のみ時間がかかります', 600000)
-      });
-      return engine;
-    })().catch(e => { engineLoading = null; throw e; });
-    return engineLoading;
-  }
-  async function llmUnderstand(text) {
-    try {
-      const e = await getEngine();
-      const r = await e.chat.completions.create({
-        temperature: .3, max_tokens: 120,
-        messages: [
-          { role:'system', content:'あなたは話しかけられた親しみやすいキャラクターです。相手の発話を15字以内で要約し、動作ラベルを1つ選び、20字以内の短い日本語の返事を考えてください。JSONのみ出力: {"summary":"","intent":"","reply":""}。intentは次のいずれか: ' + Object.keys(ANIMS).join(',') },
-          { role:'user', content:text }
-        ]
-      });
-      const m = r.choices[0].message.content.match(/\{[\s\S]*\}/);
-      const j = JSON.parse(m[0]);
-      return { intent: ANIMS[j.intent] ? j.intent : 'yes', reply: String(j.reply || 'うん'), summary: String(j.summary || text) };
-    } catch (err) {
-      toast('AI理解に失敗したので簡易判定にします: ' + (err.message || err)); $('llm').checked = false; return null;
-    }
-  }
-
-  function showBubble(reply, summary, ms = 6000) {
-    bubble.textContent = '';
-    if (summary) { const sm = document.createElement('small'); sm.textContent = summary; bubble.append(sm); }
-    const b = document.createElement('b'); b.textContent = reply; bubble.append(b);
-    bubble.hidden = false; moveBubble();
-    clearTimeout(showBubble.t); showBubble.t = setTimeout(() => { bubble.hidden = true; }, ms);
-  }
-  function speak(text) {
-    if (!('speechSynthesis' in window)) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text); u.lang = 'ja-JP'; speechSynthesis.speak(u);
-  }
-  async function handle(text) {
-    text = (text || '').trim(); if (!text) return;
-    showBubble('…', '「' + text + '」');
-    let r = null;
-    if ($('llm').checked) r = await llmUnderstand(text);
-    if (!r) r = ruleUnderstand(text);
-    showBubble(r.reply, '「' + r.summary + '」');
-    if ($('tts').checked) speak(r.reply);
-    play(r.intent);
-  }
-
-  // 入力欄 / マイク
-  const sendText = () => { const t = $('text'); const v = t.value; t.value = ''; handle(v); };
-  $('send').onclick = sendText;
-  $('text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) sendText(); });
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null;
-  $('mic').onclick = () => {
-    if (!SR) { toast('このブラウザは音声認識に未対応です。入力欄を使ってください'); return; }
-    if (rec) { rec.stop(); return; }
-    rec = new SR(); rec.lang = 'ja-JP'; rec.interimResults = false;
-    rec.onresult = e => handle(e.results[0][0].transcript);
-    rec.onerror = e => toast('音声認識エラー: ' + e.error);
-    rec.onend = () => { rec = null; $('mic').classList.remove('on'); };
-    rec.start(); $('mic').classList.add('on'); toast('話しかけてください');
-  };
-
-  // 設定パネル
-  $('gear').onclick = () => { $('panel').hidden = false; };
-  $('closePanel').onclick = () => { $('panel').hidden = true; };
-
-  /* ---------- 3Dモデル(.glb) ---------- */
-  state.three = null;
-  const MOTION_KEYS = {
-    greet:['greet','wave','hello','あいさつ','手を振'], happy:['happy','jump','cheer','joy','victory','喜'],
-    sad:['sad','cry','sorrow','悲'], bye:['bye','farewell','バイバイ'], yes:['yes','nod','agree','thumbs','うなず'],
-    no:['reject','headshake','head shake','refuse','首を振'], surprise:['surpris','shock','scare','startle','驚'],
-    dance:['danc','samba','hiphop','hip hop','twerk','breakdance','踊'], idle:['idle','breath','stand']
-  };
-  const motionPool = []; // { name, clip, tags:Set }
-  let three = null, loaderLib = null, lastPick = null;
-
-  async function lib() {
-    if (!loaderLib) {
-      const T = await import('three');
-      const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-      loaderLib = { T, loader: new GLTFLoader() };
-    }
-    return loaderLib;
-  }
-  function tagsOf(name) {
-    const n = name.toLowerCase(), tags = new Set();
-    for (const [id, ws] of Object.entries(MOTION_KEYS)) if (ws.some(w => n.includes(w))) tags.add(id);
-    return tags;
-  }
-  function addClips(clips, label) {
-    for (const clip of clips) {
-      const name = (clip.name && clip.name !== 'mixamo.com' ? clip.name + ' ' : '') + label;
-      motionPool.push({ name, clip, tags: tagsOf(name) });
-    }
-    $('motionCount').textContent = motionPool.length + '個登録済み';
-  }
-  const parseGLB = (buf) => lib().then(({ loader }) => new Promise((res, rej) => loader.parse(buf, '', res, rej)));
-
-  async function loadModel(file) {
-    try {
-      showBubble('3Dモデルを読み込み中…', '', 60000);
-      const { T } = await lib();
-      const gltf = await parseGLB(await file.arrayBuffer());
-      const model = gltf.scene;
-      const W = 512, H = 768;
-      const renderer = three ? three.renderer : new T.WebGLRenderer({ alpha:true, antialias:true });
-      renderer.setSize(W, H, false); renderer.setPixelRatio(1); renderer.setClearColor(0x000000, 0);
-      const scene = new T.Scene();
-      scene.add(new T.HemisphereLight(0xffffff, 0x444466, 1.6));
-      const sun = new T.DirectionalLight(0xffffff, 1.8); sun.position.set(2, 4, 3); scene.add(sun);
-      scene.add(model);
-      // 足元を原点・正面をカメラへ。大きさを揃えて画面に収める
-      const box = new T.Box3().setFromObject(model), size = box.getSize(new T.Vector3()), ctr = box.getCenter(new T.Vector3());
-      model.position.x -= ctr.x; model.position.z -= ctr.z; model.position.y -= box.min.y;
-      const cam = new T.PerspectiveCamera(30, W / H, 0.01, 1000);
-      const dist = Math.max((size.y / 2) / Math.tan(T.MathUtils.degToRad(15)), (size.x / 2) / Math.tan(T.MathUtils.degToRad(15)) / (W / H)) * 1.15;
-      cam.position.set(0, size.y / 2, dist); cam.lookAt(0, size.y / 2, 0);
-      let hipsY = null; model.traverse(o => { if (/hips$/i.test(o.name) && hipsY == null) hipsY = o.position.y; });
-
-      const mixer = new T.AnimationMixer(model);
-      const ctx = me.getContext('2d'), clock = new T.Clock();
-      let current = null, idleAction = null;
-      const make = clip => {
-        // 他のモデル由来の動きを合わせる:Hipsの位置だけ縮尺を合わせ、その場で動かす。他の位置トラックは捨てる
-        const c = clip.clone();
-        c.tracks = c.tracks.filter(t => !t.name.endsWith('.position') || /hips\.position$/i.test(t.name));
-        for (const t of c.tracks) if (/hips\.position$/i.test(t.name) && hipsY) {
-          const k = hipsY / (t.values[1] || hipsY);
-          for (let i = 0; i < t.values.length; i += 3) { t.values[i] = 0; t.values[i + 1] *= k; t.values[i + 2] = 0; }
-        }
-        return mixer.clipAction(c);
-      };
-      three = { renderer, mixer };
-      state.three = {
-        play(id) {
-          const own = motionPool.filter(m => m.tags.has(id));
-          const misc = motionPool.filter(m => m.tags.size === 0);
-          let cand = own.length ? own : misc;
-          if (cand.length > 1) cand = cand.filter(m => m !== lastPick);
-          if (!cand.length) return false;
-          const pick = cand[Math.floor(Math.random() * cand.length)]; lastPick = pick;
-          const a = make(pick.clip); a.reset().setLoop(T.LoopOnce, 1); a.clampWhenFinished = true;
-          if (current && current !== a) current.crossFadeTo(a, .25, false);
-          a.play(); current = a;
-          const onEnd = e => { if (e.action !== a) return; mixer.removeEventListener('finished', onEnd); if (idleAction) { idleAction.reset().play(); a.crossFadeTo(idleAction, .3, false); } current = idleAction; };
-          mixer.addEventListener('finished', onEnd);
-          showBubble.last = pick.name; return true;
-        },
-        frame() {
-          mixer.update(clock.getDelta());
-          renderer.render(scene, cam);
-          ctx.clearRect(0, 0, me.width, me.height); ctx.drawImage(renderer.domElement, 0, 0, me.width, me.height);
-        }
-      };
-      // モデル自身が持つ動きを登録。idleがあれば待機ループに使う
-      addClips(gltf.animations, file.name.replace(/\.[^.]+$/, ''));
-      const idle = motionPool.find(m => m.tags.has('idle'));
-      if (idle) { idleAction = make(idle.clip); idleAction.play(); current = idleAction; }
-      setSource(W, H, 768);
-      $('go').disabled = false; $('hint').textContent = '3Dモデルを読み込みました';
-      showBubble('3Dモデルを読み込みました', '', 2000);
-    } catch (err) {
-      console.error(err); toast('3Dモデルを読み込めません: ' + (err.message || err)); bubble.hidden = true;
-    }
-  }
-  $('motionFiles').onchange = async e => {
-    for (const f of e.target.files) {
-      try { const g = await parseGLB(await f.arrayBuffer()); addClips(g.animations, f.name.replace(/\.[^.]+$/, '')); }
-      catch (err) { toast(f.name + ' を読み込めません'); }
-    }
-    toast('モーションを追加しました');
-  };
-
-  // リポジトリに me.glb があれば自動で読み込む
-  fetch('me.glb').then(r => r.ok ? r.blob() : null).then(b => { if (b && b.size > 1000) loadFile(new File([b], 'me.glb')); }).catch(() => {});
-})();
-</script>
+<script src="app.js"></script>
+<script src="pet.js"></script>
 </body>
 </html>

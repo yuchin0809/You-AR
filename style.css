@@ -1,0 +1,83 @@
+:root { --accent:#ff4f81; }
+* { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+[hidden] { display:none !important; }
+html,body { margin:0; height:100%; background:#000; color:#fff; font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif; overflow:hidden; overscroll-behavior:none; }
+.small { font-size:.85rem; opacity:.8; }
+
+#video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; background:#111; }
+#stage { position:fixed; inset:0; touch-action:none; }
+#me { position:absolute; left:0; top:0; transform-origin:50% 50%; max-width:none; user-select:none; -webkit-user-drag:none; pointer-events:none; display:none; filter:drop-shadow(0 8px 12px rgba(0,0,0,.35)); transition:filter .6s; }
+body.sleeping #me { filter:drop-shadow(0 8px 12px rgba(0,0,0,.35)) brightness(.8) saturate(.8); }
+#fxLayer { position:fixed; inset:0; pointer-events:none; z-index:4; overflow:hidden; }
+
+/* 開始画面 */
+#start { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:24px; text-align:center; background:linear-gradient(160deg,#1b1030,#0b0b14); z-index:10; }
+#start h1 { margin:0; font-size:2.4rem; letter-spacing:.04em; }
+#start p { margin:0; opacity:.8; line-height:1.6; max-width:30em; }
+
+/* ボタン */
+button, label.btn { appearance:none; border:0; border-radius:999px; padding:14px 22px; font-size:1rem; font-weight:600; color:#fff; background:var(--accent); cursor:pointer; display:inline-block; font-family:inherit; }
+button:disabled { opacity:.4; cursor:not-allowed; }
+button.sub, label.sub { background:rgba(255,255,255,.16); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+button.danger { background:rgba(255,60,60,.25); }
+button.on { background:var(--accent); }
+
+/* 下のバー */
+#bar { position:fixed; left:0; right:0; bottom:0; padding:12px 12px calc(12px + env(safe-area-inset-bottom)); display:none; flex-direction:column; gap:10px; background:linear-gradient(transparent,rgba(0,0,0,.6)); z-index:5; }
+#bar .row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; align-items:center; }
+#bar button, #bar label.btn { padding:10px 14px; font-size:.9rem; }
+#chat { display:flex; gap:8px; width:100%; max-width:480px; margin:0 auto; }
+#chat input { flex:1; min-width:0; border:0; border-radius:999px; padding:10px 16px; font-size:1rem; background:rgba(255,255,255,.92); color:#111; }
+#mic.on { background:#e11; animation:pulse 1s infinite; }
+@keyframes pulse { 50% { opacity:.55; } }
+
+/* ごはんトレイ */
+#tray { background:rgba(0,0,0,.45); border-radius:20px; padding:8px; max-width:480px; margin:0 auto; }
+#tray button.food-pick { font-size:1.7rem; padding:6px 10px; background:rgba(255,255,255,.12); position:relative; line-height:1; }
+#tray button.food-pick small { display:block; font-size:.6rem; font-weight:500; margin-top:2px; }
+#tray button.food-pick.locked { opacity:.35; }
+#tray .trayHint { width:100%; text-align:center; font-size:.75rem; opacity:.75; }
+
+/* 投げる食べ物 / パーティクル */
+.food { position:fixed; left:0; top:0; font-size:56px; line-height:1; pointer-events:auto; touch-action:none; user-select:none; cursor:grab; z-index:7; filter:drop-shadow(0 6px 8px rgba(0,0,0,.4)); will-change:transform; }
+.food.eaten { transition:transform .35s ease-in, opacity .35s; opacity:0; }
+.particle { position:fixed; left:0; top:0; font-size:28px; pointer-events:none; animation:floatUp 1.4s ease-out forwards; }
+.particle.z { font-size:22px; font-weight:800; color:#cde; animation-duration:2.4s; }
+@keyframes floatUp { 0% { transform:translate(var(--x),var(--y)) scale(.6); opacity:0; } 15% { opacity:1; } 100% { transform:translate(calc(var(--x) + var(--dx)), calc(var(--y) - 90px)) scale(1.15); opacity:0; } }
+
+/* ステータス */
+#hud { position:fixed; top:calc(10px + env(safe-area-inset-top)); left:10px; z-index:8; background:rgba(0,0,0,.45); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border-radius:16px; padding:8px 12px; min-width:150px; font-size:.8rem; }
+#hud .hudTop { display:flex; justify-content:space-between; gap:10px; font-size:.95rem; }
+#hud .hudTop span { color:#ffc; font-weight:700; }
+#hud .hudSub { opacity:.7; font-size:.7rem; margin:2px 0 4px; }
+#hud .stat { display:flex; align-items:center; gap:6px; margin-top:3px; }
+#hud .stat span { width:1.2em; text-align:center; }
+#hud .stat i { flex:1; height:7px; background:rgba(255,255,255,.18); border-radius:9px; overflow:hidden; }
+#hud .stat em { display:block; height:100%; width:50%; background:#6c6; border-radius:9px; transition:width .5s, background .5s; }
+
+/* 吹き出し / トースト */
+#toast { position:fixed; bottom:calc(175px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); padding:8px 16px; border-radius:999px; font-size:.85rem; z-index:20; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap; max-width:92vw; overflow:hidden; text-overflow:ellipsis; }
+#toast.show { opacity:1; }
+#bubble { position:fixed; transform:translate(-50%,-100%); max-width:80vw; background:#fff; color:#111; border-radius:18px; padding:8px 14px; z-index:6; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.35); text-align:center; }
+#bubble small { display:block; opacity:.55; font-size:.72rem; margin-bottom:2px; }
+#bubble b { font-size:1.05rem; }
+
+/* 自撮り */
+#selfieUI { position:fixed; left:0; right:0; bottom:0; padding:16px 16px calc(20px + env(safe-area-inset-bottom)); display:flex; align-items:center; justify-content:space-between; gap:12px; z-index:5; background:linear-gradient(transparent,rgba(0,0,0,.55)); }
+#selfieUI .small { width:90px; text-align:right; font-size:.7rem; }
+#selfieUI #selfieExit { padding:10px 14px; font-size:.9rem; }
+.shutter { width:74px; height:74px; padding:0; border-radius:50%; background:#fff; border:5px solid rgba(255,255,255,.45); background-clip:padding-box; box-shadow:0 0 0 3px #fff; }
+.shutter:active { transform:scale(.94); }
+#count { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; font-size:9rem; font-weight:800; z-index:12; pointer-events:none; text-shadow:0 4px 24px rgba(0,0,0,.5); }
+#flash { position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:13; transition:opacity .4s; }
+#flash.on { opacity:1; transition:none; }
+
+/* 設定 */
+#gear { position:fixed; top:calc(10px + env(safe-area-inset-top)); right:10px; z-index:8; display:none; padding:8px 12px; }
+#panel { position:fixed; inset:0; z-index:15; background:rgba(10,10,20,.95); padding:20px 20px calc(20px + env(safe-area-inset-bottom)); overflow:auto; }
+#panel h3 { margin:18px 0 6px; }
+#panel label.opt { display:block; margin:8px 0; line-height:1.5; }
+#panel p { opacity:.8; font-size:.85rem; margin:6px 0; line-height:1.5; }
+#panel button, #panel label.btn { padding:9px 15px; font-size:.85rem; }
+.field { border:0; border-radius:12px; padding:10px 14px; font-size:1rem; width:100%; max-width:280px; background:rgba(255,255,255,.92); color:#111; }
+input[type=file] { display:none; }
