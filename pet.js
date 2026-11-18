@@ -31,7 +31,11 @@
     try { const j = JSON.parse(localStorage.getItem(KEY)); if (j && j.v === 1) return Object.assign(def(), j); } catch (_) {}
     return def();
   }
-  function save() { P.lastSeen = now(); try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (_) {} }
+  function save() {
+    P.lastSeen = now();
+    try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (_) {}
+    A.idb.set('pet', P).catch(() => {}); // 閉じている間の通知(sw.js)が読む
+  }
 
   /* ---------- 成長 ---------- */
   const lvOf = xp => Math.floor(Math.sqrt(xp / 20)) + 1;
@@ -296,6 +300,56 @@
     if (!confirm('育成データを消して、最初からやり直しますか?')) return;
     try { localStorage.removeItem(KEY); } catch (_) {}
     P = def(); save(); hud(); A.setBaseFx(null); A.toast('リセットしました');
+  };
+
+  /* ---------- 通知(サーバーなし) ---------- */
+  let notifyCfg = { on:false, last:{} };
+  A.idb.get('notify').then(c => { if (c) { notifyCfg = c; $('notifyOn').checked = !!c.on; } }).catch(() => {});
+  $('notifyOn').onchange = async e => {
+    if (e.target.checked) {
+      if (!('Notification' in window) || !('serviceWorker' in navigator)) { e.target.checked = false; A.toast('この端末は通知に未対応です'); return; }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { e.target.checked = false; A.toast('通知が許可されませんでした'); return; }
+      notifyCfg.on = true; await A.idb.set('notify', notifyCfg).catch(() => {});
+      const reg = await navigator.serviceWorker.ready;
+      if ('periodicSync' in reg) {
+        try { await reg.periodicSync.register('pet-check', { minInterval: 2 * HOUR }); A.toast('アプリを閉じていても、おなかがすいたら通知します'); }
+        catch (_) { A.toast('閉じている間の通知は、ホーム画面に追加すると使えます'); }
+      } else A.toast('この端末では、アプリを開いている間だけ通知します');
+    } else {
+      notifyCfg.on = false; A.idb.set('notify', notifyCfg).catch(() => {});
+      navigator.serviceWorker && navigator.serviceWorker.ready.then(r => r.periodicSync && r.periodicSync.unregister('pet-check')).catch(() => {});
+    }
+  };
+  // 別のアプリを見ている間(このアプリは裏で開いたまま)も確認する
+  setInterval(() => {
+    if (document.hidden && notifyCfg.on && navigator.serviceWorker && navigator.serviceWorker.controller) { save(); navigator.serviceWorker.controller.postMessage('pet-check'); }
+  }, 5 * 60e3);
+
+  /* ---------- ホーム画面に追加 ---------- */
+  let installEvt = null;
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('installBtn').hidden = false; });
+  $('installBtn').onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; $('installBtn').hidden = true; };
+
+  /* ---------- バックアップ・復元(ファイルで受け渡し) ---------- */
+  $('backupBtn').onclick = () => {
+    save();
+    const blob = new Blob([JSON.stringify({ app:'you-ar', v:1, savedAt:now(), pet:P }, null, 1)], { type:'application/json' });
+    const d = new Date(), ymd = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `you-ar-backup-${ymd}.json`; a.click();
+    A.toast('バックアップを保存しました');
+  };
+  $('restoreFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try {
+      const j = JSON.parse(await f.text());
+      if (j.app !== 'you-ar' || !j.pet || j.pet.v !== 1) throw new Error('形式が違います');
+      if (!confirm(`${new Date(j.savedAt).toLocaleString()} のバックアップで上書きしますか?`)) return;
+      P = Object.assign(def(), j.pet); P.lastTick = now(); // 復元した時点から時間を進める
+      save(); hud(); buildTray(); A.setBaseFx(P.sleeping && A.state.started ? sleepFx : null);
+      $('nameInput').value = P.name === 'ぼく' ? '' : P.name;
+      A.toast('復元しました');
+    } catch (err) { A.toast('復元できません: ' + err.message); }
   };
 
   setInterval(tick, 30e3);

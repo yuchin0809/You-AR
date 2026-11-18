@@ -6,6 +6,13 @@
 <meta name="theme-color" content="#0b0b14">
 <title>You AR</title>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="You AR">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -82,8 +89,17 @@
   <h3>3Dモーション(.glb、複数選択可)</h3>
   <p>Mixamoなどで書き出した動き(骨格付き.glb)。ファイル名に dance / wave / happy / sad / nod / shake / surprise / eat / idle などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
   <p><label class="btn sub">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
+  <p><button class="sub" id="clearMotions">追加したモーションを全部消す</button></p>
+  <p>選んだ3Dモデルとモーションはこの端末に保存され、次回から自動で読み込まれます。</p>
+  <h3>通知</h3>
+  <label class="opt"><input id="notifyOn" type="checkbox"> おなかがすいたら通知でお知らせ</label>
+  <p id="notifyInfo">アプリを閉じている間の通知は、ホーム画面に追加したAndroidのChromeで動きます(頻度はブラウザが決めます)。iPhoneでは、アプリを開いている間だけ通知します。</p>
+  <h3>アプリにする</h3>
+  <p>ブラウザのメニューから「ホーム画面に追加」すると、アプリのように起動でき、通信がなくても動きます。</p>
+  <p><button class="sub" id="installBtn" hidden>ホーム画面に追加</button></p>
   <h3>データ</h3>
-  <p>育成データはこの端末のブラウザに保存されます。</p>
+  <p>育成データはこの端末のブラウザに保存されます。機種変更するときは、バックアップを保存して新しい端末で復元してください(3Dモデルは含まれません)。</p>
+  <p><button class="sub" id="backupBtn">バックアップを保存</button> <label class="btn sub">バックアップから復元<input id="restoreFile" type="file" accept=".json,application/json"></label></p>
   <p><button class="sub danger" id="resetBtn">育成データをリセット</button></p>
   <p style="margin-top:22px"><button id="closePanel">閉じる</button></p>
 </div>

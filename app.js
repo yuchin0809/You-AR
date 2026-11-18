@@ -8,6 +8,21 @@
   const hooks = {};
   let baseW = 0, baseH = 0;
 
+  // 端末内の保存領域(IndexedDB)。3Dモデル・モーション・育成データを保存する。サーバーは使わない
+  const idb = (() => {
+    let dbp;
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      const r = indexedDB.open('youar', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    }));
+    const tx = (mode, fn) => open().then(db => new Promise((res, rej) => {
+      const t = db.transaction('kv', mode), q = fn(t.objectStore('kv'));
+      t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error);
+    }));
+    return { get: k => tx('readonly', st => st.get(k)), set: (k, v) => tx('readwrite', st => st.put(v, k)), del: k => tx('readwrite', st => st.delete(k)) };
+  })();
+
   const toast = msg => { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400); };
   const pick = a => a[Math.floor(Math.random() * a.length)];
 
@@ -387,10 +402,10 @@
     for (const [id, ws] of Object.entries(MOTION_KEYS)) if (ws.some(w => n.includes(w))) tags.add(id);
     return tags;
   }
-  function addClips(clips, label) {
+  function addClips(clips, label, src = 'motion') {
     for (const clip of clips) {
       const name = (clip.name && clip.name !== 'mixamo.com' ? clip.name + ' ' : '') + label;
-      motionPool.push({ name, clip, tags: tagsOf(name) });
+      motionPool.push({ name, clip, tags: tagsOf(name), src });
     }
     $('motionCount').textContent = motionPool.length + '個登録済み';
   }
@@ -453,28 +468,47 @@
         }
       };
       // モデル自身が持つ動きを登録。idleがあれば待機ループに使う
-      addClips(gltf.animations, file.name.replace(/\.[^.]+$/, ''));
+      for (let i = motionPool.length - 1; i >= 0; i--) if (motionPool[i].src === 'model') motionPool.splice(i, 1);
+      addClips(gltf.animations, file.name.replace(/\.[^.]+$/, ''), 'model');
       const idle = motionPool.find(m => m.tags.has('idle'));
       if (idle) { idleAction = make(idle.clip); idleAction.play(); current = idleAction; }
       setSource(W, H, 768);
       $('go').disabled = false; $('hint').textContent = '3Dモデルを読み込みました';
       showBubble('3Dモデルを読み込みました', '', 2000);
+      return true;
     } catch (err) {
       console.error(err); toast('3Dモデルを読み込めません: ' + (err.message || err)); bubble.hidden = true;
+      return false;
     }
   }
-  function loadFile(file) {
-    if (!file) return;
-    if (!/\.(glb|gltf)$/i.test(file.name)) { toast('3Dモデル(.glb)を選んでください'); return; }
-    state.three = null; loadModel(file);
+  // persist: 次回から自動で読み込めるよう端末に保存する
+  async function loadFile(file, persist = true) {
+    if (!file) return false;
+    if (!/\.(glb|gltf)$/i.test(file.name)) { toast('3Dモデル(.glb)を選んでください'); return false; }
+    state.three = null;
+    const ok = await loadModel(file);
+    if (ok && persist) idb.set('model', { name:file.name, blob:file }).catch(() => toast('3Dモデルを端末に保存できませんでした(容量不足かも)'));
+    return ok;
+  }
+  async function addMotionFile(f) {
+    const gl = await parseGLB(await f.arrayBuffer());
+    addClips(gl.animations, f.name.replace(/\.[^.]+$/, ''));
   }
   $('motionFiles').onchange = async e => {
+    const saved = (await idb.get('motions').catch(() => null)) || [];
     for (const f of e.target.files) {
-      try { const gl = await parseGLB(await f.arrayBuffer()); addClips(gl.animations, f.name.replace(/\.[^.]+$/, '')); }
+      try { await addMotionFile(f); saved.push({ name:f.name, blob:f }); }
       catch (err) { toast(f.name + ' を読み込めません'); }
     }
+    idb.set('motions', saved).catch(() => toast('モーションを端末に保存できませんでした'));
     toast('モーションを追加しました');
   };
+  $('clearMotions').onclick = () => {
+    for (let i = motionPool.length - 1; i >= 0; i--) if (motionPool[i].src !== 'model') motionPool.splice(i, 1);
+    $('motionCount').textContent = motionPool.length + '個登録済み';
+    idb.del('motions').catch(() => {}); toast('追加したモーションを消しました');
+  };
+
 
   /* ---------- UI ---------- */
   $('file0').onchange = e => loadFile(e.target.files[0]);
@@ -493,8 +527,27 @@
   addEventListener('resize', () => render());
 
   // リポジトリに me.glb があれば自動で読み込む
-  fetch('me.glb').then(r => r.ok ? r.blob() : null).then(b => { if (b && b.size > 1000) loadFile(new File([b], 'me.glb')); }).catch(() => {});
+  // 起動時:リポジトリの me.glb → 前回端末に保存した3Dモデル の順に探して自動で読み込む
+  (async () => {
+    let loaded = false;
+    try {
+      const r = await fetch('me.glb');
+      const b = r.ok ? await r.blob() : null;
+      const magic = b && b.size > 1000 ? new TextDecoder().decode(await b.slice(0, 4).arrayBuffer()) : '';
+      if (magic === 'glTF') loaded = await loadFile(new File([b], 'me.glb'), false);
+    } catch (_) {}
+    if (!loaded) {
+      const rec = await idb.get('model').catch(() => null);
+      if (rec && rec.blob) { loaded = await loadFile(new File([rec.blob], rec.name), false); if (loaded) $('hint').textContent = '前回の3Dモデルを読み込みました'; }
+    }
+    const ms = (await idb.get('motions').catch(() => null)) || [];
+    for (const m of ms) await addMotionFile(new File([m.blob], m.name)).catch(() => {});
+  })();
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); // 保存データが勝手に消されないよう依頼
+
+  // オフラインでも起動できるようにする(PWA)
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 育成などの拡張用API
-  window.YouAR = { $, state, hooks, play, say, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render };
+  window.YouAR = { $, idb, state, hooks, play, say, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render };
 })();
