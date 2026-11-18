@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>You AR</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <style>
   :root { --accent:#ff4f81; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -49,8 +50,8 @@
   <h1>You AR</h1>
   <p>カメラ越しの世界に「あなた」を登場させます。<br>
      写真を選んで、カメラを起動してください。映像は端末の外に送信されません。<br>動きを出したいときは、無地(緑など)の背景で撮った全身動画を選んでください。</p>
-  <label class="btn sub" for="file0">① 自分の写真・動画を選ぶ</label>
-  <input id="file0" type="file" accept="image/*,video/*">
+  <label class="btn sub" for="file0">① 自分の写真・動画・3D(.glb)を選ぶ</label>
+  <input id="file0" type="file" accept="image/*,video/*,.glb,.gltf">
   <button id="go" disabled>② ARを始める</button>
   <p id="hint" style="font-size:.85rem"></p>
 </div>
@@ -68,7 +69,7 @@
   </div>
   <div class="row">
     <label class="btn sub" for="file1">写真/動画変更</label>
-    <input id="file1" type="file" accept="image/*,video/*">
+    <input id="file1" type="file" accept="image/*,video/*,.glb,.gltf">
     <button class="sub" id="flip">カメラ切替</button>
     <button class="sub" id="mirror">左右反転</button>
     <button id="shot">📷 撮影</button>
@@ -81,7 +82,10 @@
   <h3>設定</h3>
   <label class="opt"><input id="tts" type="checkbox" checked> 声で返事する(端末の音声合成)</label>
   <label class="opt"><input id="llm" type="checkbox"> AIで理解・要約する(WebLLM。初回のみ約1GBをダウンロード。WebGPU対応の端末向け)</label>
-  <h3>動作ごとの動画(任意)</h3>
+  <h3>3Dモーション(.glb、複数選択可)</h3>
+  <p>Mixamoなどで書き出した動き(骨格付き.glb)を選びます。ファイル名に dance / wave / happy / sad / nod / shake / surprise などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
+  <p><label class="btn sub" style="padding:8px 14px;font-size:.85rem">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
+  <h3>動作ごとの動画(2D用・任意)</h3>
   <p>登録しない動作は、今の写真・動画を動かして表現します。動画は再生後に元の姿勢へ戻ります。背景は同じ色で撮ってください。</p>
   <div id="clipList"></div>
   <p style="margin-top:18px"><button id="closePanel">閉じる</button></p>
@@ -105,6 +109,8 @@
     const url = URL.createObjectURL(file);
     if (state.vid) { state.vid.pause(); state.vid = null; } state.idleVid = null;
     state.src = null;
+    state.three = null;
+    if (/\.(glb|gltf)$/i.test(file.name)) { loadModel(file); return; }
     if (file.type.startsWith('video')) {
       const v = document.createElement('video');
       v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', '');
@@ -145,7 +151,11 @@
   }
   state.cut = me;
   function applyKey() { if (state.src) keyFrame(state.src); }
-  (function loop() { if (state.vid && state.vid.readyState >= 2) keyFrame(state.vid); requestAnimationFrame(loop); })();
+  (function loop() {
+    if (state.vid && state.vid.readyState >= 2) keyFrame(state.vid);
+    if (state.three) state.three.frame();
+    requestAnimationFrame(loop);
+  })();
 
   /* ---------- カメラ ---------- */
   async function startCamera() {
@@ -290,6 +300,7 @@
     animRaf = requestAnimationFrame(step);
   }
   function play(id) {
+    if (state.three && state.three.play(id)) return;
     const clip = state.clips[id];
     if (clip) {
       state.vid = clip; clip.currentTime = 0; clip.play().catch(() => {});
@@ -405,6 +416,115 @@
     test.onclick = () => { $('panel').hidden = true; play(id); };
     $('clipList').append(row);
   }
+
+
+  /* ---------- 3Dモデル(.glb) ---------- */
+  state.three = null;
+  const MOTION_KEYS = {
+    greet:['greet','wave','hello','あいさつ','手を振'], happy:['happy','jump','cheer','joy','victory','喜'],
+    sad:['sad','cry','sorrow','悲'], bye:['bye','farewell','バイバイ'], yes:['yes','nod','agree','thumbs','うなず'],
+    no:['reject','headshake','head shake','refuse','首を振'], surprise:['surpris','shock','scare','startle','驚'],
+    dance:['danc','samba','hiphop','hip hop','twerk','breakdance','踊'], idle:['idle','breath','stand']
+  };
+  const motionPool = []; // { name, clip, tags:Set }
+  let three = null, loaderLib = null, lastPick = null;
+
+  async function lib() {
+    if (!loaderLib) {
+      const T = await import('three');
+      const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+      loaderLib = { T, loader: new GLTFLoader() };
+    }
+    return loaderLib;
+  }
+  function tagsOf(name) {
+    const n = name.toLowerCase(), tags = new Set();
+    for (const [id, ws] of Object.entries(MOTION_KEYS)) if (ws.some(w => n.includes(w))) tags.add(id);
+    return tags;
+  }
+  function addClips(clips, label) {
+    for (const clip of clips) {
+      const name = (clip.name && clip.name !== 'mixamo.com' ? clip.name + ' ' : '') + label;
+      motionPool.push({ name, clip, tags: tagsOf(name) });
+    }
+    $('motionCount').textContent = motionPool.length + '個登録済み';
+  }
+  const parseGLB = (buf) => lib().then(({ loader }) => new Promise((res, rej) => loader.parse(buf, '', res, rej)));
+
+  async function loadModel(file) {
+    try {
+      showBubble('3Dモデルを読み込み中…', '', 60000);
+      const { T } = await lib();
+      const gltf = await parseGLB(await file.arrayBuffer());
+      const model = gltf.scene;
+      const W = 512, H = 768;
+      const renderer = three ? three.renderer : new T.WebGLRenderer({ alpha:true, antialias:true });
+      renderer.setSize(W, H, false); renderer.setPixelRatio(1); renderer.setClearColor(0x000000, 0);
+      const scene = new T.Scene();
+      scene.add(new T.HemisphereLight(0xffffff, 0x444466, 1.6));
+      const sun = new T.DirectionalLight(0xffffff, 1.8); sun.position.set(2, 4, 3); scene.add(sun);
+      scene.add(model);
+      // 足元を原点・正面をカメラへ。大きさを揃えて画面に収める
+      const box = new T.Box3().setFromObject(model), size = box.getSize(new T.Vector3()), ctr = box.getCenter(new T.Vector3());
+      model.position.x -= ctr.x; model.position.z -= ctr.z; model.position.y -= box.min.y;
+      const cam = new T.PerspectiveCamera(30, W / H, 0.01, 1000);
+      const dist = Math.max((size.y / 2) / Math.tan(T.MathUtils.degToRad(15)), (size.x / 2) / Math.tan(T.MathUtils.degToRad(15)) / (W / H)) * 1.15;
+      cam.position.set(0, size.y / 2, dist); cam.lookAt(0, size.y / 2, 0);
+      let hipsY = null; model.traverse(o => { if (/hips$/i.test(o.name) && hipsY == null) hipsY = o.position.y; });
+
+      const mixer = new T.AnimationMixer(model);
+      const ctx = me.getContext('2d'), clock = new T.Clock();
+      let current = null, idleAction = null;
+      const make = clip => {
+        // 他のモデル由来の動きを合わせる:Hipsの位置だけ縮尺を合わせ、その場で動かす。他の位置トラックは捨てる
+        const c = clip.clone();
+        c.tracks = c.tracks.filter(t => !t.name.endsWith('.position') || /hips\.position$/i.test(t.name));
+        for (const t of c.tracks) if (/hips\.position$/i.test(t.name) && hipsY) {
+          const k = hipsY / (t.values[1] || hipsY);
+          for (let i = 0; i < t.values.length; i += 3) { t.values[i] = 0; t.values[i + 1] *= k; t.values[i + 2] = 0; }
+        }
+        return mixer.clipAction(c);
+      };
+      three = { renderer, mixer };
+      state.three = {
+        play(id) {
+          const own = motionPool.filter(m => m.tags.has(id));
+          const misc = motionPool.filter(m => m.tags.size === 0);
+          let cand = own.length ? own : misc;
+          if (cand.length > 1) cand = cand.filter(m => m !== lastPick);
+          if (!cand.length) return false;
+          const pick = cand[Math.floor(Math.random() * cand.length)]; lastPick = pick;
+          const a = make(pick.clip); a.reset().setLoop(T.LoopOnce, 1); a.clampWhenFinished = true;
+          if (current && current !== a) current.crossFadeTo(a, .25, false);
+          a.play(); current = a;
+          const onEnd = e => { if (e.action !== a) return; mixer.removeEventListener('finished', onEnd); if (idleAction) { idleAction.reset().play(); a.crossFadeTo(idleAction, .3, false); } current = idleAction; };
+          mixer.addEventListener('finished', onEnd);
+          showBubble.last = pick.name; return true;
+        },
+        frame() {
+          mixer.update(clock.getDelta());
+          renderer.render(scene, cam);
+          ctx.clearRect(0, 0, me.width, me.height); ctx.drawImage(renderer.domElement, 0, 0, me.width, me.height);
+        }
+      };
+      // モデル自身が持つ動きを登録。idleがあれば待機ループに使う
+      addClips(gltf.animations, file.name.replace(/\.[^.]+$/, ''));
+      const idle = motionPool.find(m => m.tags.has('idle'));
+      if (idle) { idleAction = make(idle.clip); idleAction.play(); current = idleAction; }
+      setSource(W, H, 768); state.src = null; state.vid = null; state.idleVid = null;
+      $('go').disabled = false; $('hint').textContent = '3Dモデルを読み込みました';
+      showBubble('3Dモデルを読み込みました', '', 2000);
+    } catch (err) {
+      console.error(err); toast('3Dモデルを読み込めません: ' + (err.message || err)); bubble.hidden = true;
+    }
+  }
+  $('motionFiles').onchange = async e => {
+    for (const f of e.target.files) {
+      try { const g = await parseGLB(await f.arrayBuffer()); addClips(g.animations, f.name.replace(/\.[^.]+$/, '')); }
+      catch (err) { toast(f.name + ' を読み込めません'); }
+    }
+    toast('モーションを追加しました');
+  };
 
   // リポジトリに me.png があれば自動で読み込む
   fetch('me.png').then(r => r.ok ? r.blob() : null).then(b => { if (b && b.type.startsWith('image')) loadFile(b); }).catch(() => {});
