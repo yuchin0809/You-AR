@@ -20,21 +20,13 @@
 <div id="stage"><canvas id="me"></canvas></div>
 <div id="fxLayer"></div>
 
-<!-- ステータス -->
-<div id="hud" hidden>
-  <div class="hudTop"><b id="hudName">ぼく</b><span id="hudLv">Lv1</span></div>
-  <div class="hudSub" id="hudSub"></div>
-  <div class="stat" title="おなか"><span>🍙</span><i><em id="barHunger"></em></i></div>
-  <div class="stat" title="きげん"><span>😊</span><i><em id="barMood"></em></i></div>
-  <div class="stat" title="げんき"><span>⚡</span><i><em id="barEnergy"></em></i></div>
-  <div class="stat" title="なかよし(次のレベルまで)"><span>💗</span><i><em id="barBond"></em></i></div>
-</div>
+<div id="actIcon" hidden></div>
 
 <!-- 開始画面 -->
 <div id="start">
   <h1>You AR</h1>
-  <p>カメラ越しの世界で、3Dの「あなた」と一緒に暮らそう。<br>
-     ごはんをあげたり、なでたり、話しかけたり、一緒に自撮りしたり。<br>
+  <p>カメラ越しの部屋で、3Dの「あなた」とルームメイトとして暮らそう。<br>
+     話したり、おやつを食べたり、じゃんけんしたり、一緒に自撮りしたり。<br>
      骨格付きの3Dモデル(.glb)を選んで、カメラを起動してください。映像は端末の外に送信されません。</p>
   <label class="btn sub" for="file0">① 自分の3Dモデル(.glb)を選ぶ</label>
   <input id="file0" type="file" accept=".glb,.gltf">
@@ -44,15 +36,14 @@
 
 <!-- 下のバー -->
 <div id="bar">
-  <div id="tray" class="row" hidden></div>
+  <div id="acts" class="row" hidden></div>
   <div id="chat">
     <input id="text" type="text" placeholder="話しかける言葉を入力…" autocomplete="off" enterkeyhint="send">
     <button id="send">送信</button>
     <button id="mic" class="sub" title="音声で話しかける">🎤</button>
   </div>
   <div class="row">
-    <button class="sub" id="feedBtn">🍙 ごはん</button>
-    <button class="sub" id="sleepBtn">💤 おやすみ</button>
+    <button class="sub" id="actBtn">🤝 いっしょに</button>
     <button class="sub" id="selfieBtn">🤳 自撮り</button>
     <button id="shot">📷 撮影</button>
   </div>
@@ -67,44 +58,61 @@
 <div id="count"></div>
 <div id="flash"></div>
 
+<!-- 暮らす範囲を決める -->
+<div id="zoneUI" hidden>
+  <div id="zoneRect" hidden></div>
+  <div id="zonePanel">
+    <p id="zoneMsg"></p>
+    <div id="zoneSize" hidden><span>小</span><input id="sizeRange" type="range" min="20" max="160" value="70"><span>大</span></div>
+    <div class="row" id="zoneBtns"></div>
+  </div>
+</div>
 <div id="toast"></div>
 <div id="bubble" hidden></div>
 <button id="gear" class="sub">⚙</button>
 
 <!-- 設定 -->
 <div id="panel" hidden>
-  <h3>なまえ</h3>
-  <p><input id="nameInput" type="text" maxlength="12" class="field" placeholder="ぼく"></p>
+  <h3>ルームメイトの名前</h3>
+  <p><input id="nameInput" type="text" maxlength="12" class="field" placeholder="ルームメイト"></p>
+  <h3>あなたの名前</h3>
+  <p><input id="userNameInput" type="text" maxlength="12" class="field" placeholder="呼んでほしい名前"></p>
   <h3>操作</h3>
-  <p>1本指でなでる・タップでつつく / 2本指で移動・拡大・回転 / 何もない所をダブルタップでそこへ移動</p>
+  <p>肩をたたく=僕をタップ / 肩をもむ=僕の上で指を動かす / 呼ぶ=何もない所をダブルタップ / 大きさ=2本指でつまむ</p>
+  <h3>暮らす範囲</h3>
+  <p>起動時に決めた範囲の中を、自分で歩き回ります。</p>
+  <p><button class="sub" id="zoneBtn">範囲を決め直す</button></p>
   <h3>表示</h3>
   <label class="opt"><input id="anchor" type="checkbox" checked> 空間に固定(ジャイロ)</label>
   <p><button class="sub" id="flip">カメラ切替</button> <button class="sub" id="mirror">左右反転</button></p>
   <h3>返事</h3>
   <label class="opt"><input id="tts" type="checkbox" checked> 声で返事する(端末の音声合成)</label>
   <label class="opt"><input id="chatter" type="checkbox" checked> ときどき自分から話しかけてくる</label>
-  <label class="opt"><input id="llm" type="checkbox"> AIで理解・要約する(WebLLM。初回のみ約1GBをダウンロード。WebGPU対応の端末向け)</label>
+  <label class="opt"><input id="llm" type="checkbox"> AIで会話する(記憶つきで自然に話します。WebLLM。初回のみ約1GBをダウンロード。WebGPU対応の端末向け)</label>
   <h3>3Dモデル</h3>
   <p><label class="btn sub" for="file1">3Dモデル変更</label><input id="file1" type="file" accept=".glb,.gltf"></p>
   <h3>3Dモーション(.glb、複数選択可)</h3>
-  <p>Mixamoなどで書き出した動き(骨格付き.glb)。ファイル名に dance / wave / happy / sad / nod / shake / surprise / eat / idle などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
+  <p>Mixamoなどで書き出した動き(骨格付き.glb)。ファイル名に dance / wave / happy / sad / nod / shake / surprise / eat / walk / idle などが含まれると、その場面で使われます。分類できないものは、どの場面でもランダムに使われます。同じ場面の候補が複数あると、毎回ランダムに選びます。</p>
   <p><label class="btn sub">モーションを追加<input id="motionFiles" type="file" accept=".glb,.gltf" multiple></label> <span id="motionCount"></span></p>
   <p><button class="sub" id="clearMotions">追加したモーションを全部消す</button></p>
   <p>選んだ3Dモデルとモーションはこの端末に保存され、次回から自動で読み込まれます。</p>
+  <h3>おぼえていること</h3>
+  <p>会話の中で覚えたことです。違っていたら消してください。</p>
+  <div id="factList"></div>
   <h3>通知</h3>
-  <label class="opt"><input id="notifyOn" type="checkbox"> おなかがすいたら通知でお知らせ</label>
-  <p id="notifyInfo">アプリを閉じている間の通知は、ホーム画面に追加したAndroidのChromeで動きます(頻度はブラウザが決めます)。iPhoneでは、アプリを開いている間だけ通知します。</p>
+  <label class="opt"><input id="notifyOn" type="checkbox"> しばらく会わないと、ひとことメッセージ</label>
+  <p id="notifyInfo">アプリを閉じている間の通知は、ホーム画面に追加したAndroidのChromeで動きます(頻度はブラウザが決めます)。iPhoneでは、アプリを開いている間だけです。責めるような通知はしません。</p>
   <h3>アプリにする</h3>
   <p>ブラウザのメニューから「ホーム画面に追加」すると、アプリのように起動でき、通信がなくても動きます。</p>
   <p><button class="sub" id="installBtn" hidden>ホーム画面に追加</button></p>
   <h3>データ</h3>
-  <p>育成データはこの端末のブラウザに保存されます。機種変更するときは、バックアップを保存して新しい端末で復元してください(3Dモデルは含まれません)。</p>
+  <p>思い出や覚えたことはこの端末のブラウザに保存されます。機種変更するときは、バックアップを保存して新しい端末で復元してください(3Dモデルは含まれません)。</p>
   <p><button class="sub" id="backupBtn">バックアップを保存</button> <label class="btn sub">バックアップから復元<input id="restoreFile" type="file" accept=".json,application/json"></label></p>
-  <p><button class="sub danger" id="resetBtn">育成データをリセット</button></p>
+  <p><button class="sub danger" id="resetBtn">思い出を全部消す</button></p>
   <p style="margin-top:22px"><button id="closePanel">閉じる</button></p>
 </div>
 
 <script src="app.js"></script>
-<script src="pet.js"></script>
+<script src="roommate.js"></script>
 </body>
 </html>

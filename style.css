@@ -31,29 +31,33 @@ button.on { background:var(--accent); }
 #mic.on { background:#e11; animation:pulse 1s infinite; }
 @keyframes pulse { 50% { opacity:.55; } }
 
-/* ごはんトレイ */
-#tray { background:rgba(0,0,0,.45); border-radius:20px; padding:8px; max-width:480px; margin:0 auto; }
-#tray button.food-pick { font-size:1.7rem; padding:6px 10px; background:rgba(255,255,255,.12); position:relative; line-height:1; }
-#tray button.food-pick small { display:block; font-size:.6rem; font-weight:500; margin-top:2px; }
-#tray button.food-pick.locked { opacity:.35; }
-#tray .trayHint { width:100%; text-align:center; font-size:.75rem; opacity:.75; }
+/* いっしょに(アクションメニュー) */
+#acts { background:rgba(0,0,0,.45); border-radius:20px; padding:8px; max-width:480px; margin:0 auto; }
+#acts button.act { padding:8px 12px; font-size:.9rem; background:rgba(255,255,255,.14); }
+#acts button.item { font-size:1.6rem; padding:6px 10px; line-height:1; background:rgba(255,255,255,.12); }
+#acts .actHint { width:100%; text-align:center; font-size:.75rem; opacity:.75; }
 
-/* 投げる食べ物 / パーティクル */
-.food { position:fixed; left:0; top:0; font-size:56px; line-height:1; pointer-events:auto; touch-action:none; user-select:none; cursor:grab; z-index:7; filter:drop-shadow(0 6px 8px rgba(0,0,0,.4)); will-change:transform; }
-.food.eaten { transition:transform .35s ease-in, opacity .35s; opacity:0; }
+/* ハイタッチ・じゃんけん・おやつの演出 */
+.pop { position:fixed; left:0; top:0; font-size:60px; line-height:1; z-index:7; user-select:none; filter:drop-shadow(0 6px 8px rgba(0,0,0,.4)); }
+.pop.tappable { pointer-events:auto; cursor:pointer; animation:throb .5s ease-in-out infinite alternate; }
+@keyframes throb { to { transform:translate(var(--tx),var(--ty)) scale(1.18); } }
 .particle { position:fixed; left:0; top:0; font-size:28px; pointer-events:none; animation:floatUp 1.4s ease-out forwards; }
 .particle.z { font-size:22px; font-weight:800; color:#cde; animation-duration:2.4s; }
 @keyframes floatUp { 0% { transform:translate(var(--x),var(--y)) scale(.6); opacity:0; } 15% { opacity:1; } 100% { transform:translate(calc(var(--x) + var(--dx)), calc(var(--y) - 90px)) scale(1.15); opacity:0; } }
+#actIcon { position:fixed; left:0; top:0; z-index:6; font-size:30px; pointer-events:none; transform:translate(-50%,-50%); filter:drop-shadow(0 3px 5px rgba(0,0,0,.4)); }
 
-/* ステータス */
-#hud { position:fixed; top:calc(10px + env(safe-area-inset-top)); left:10px; z-index:8; background:rgba(0,0,0,.45); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border-radius:16px; padding:8px 12px; min-width:150px; font-size:.8rem; }
-#hud .hudTop { display:flex; justify-content:space-between; gap:10px; font-size:.95rem; }
-#hud .hudTop span { color:#ffc; font-weight:700; }
-#hud .hudSub { opacity:.7; font-size:.7rem; margin:2px 0 4px; }
-#hud .stat { display:flex; align-items:center; gap:6px; margin-top:3px; }
-#hud .stat span { width:1.2em; text-align:center; }
-#hud .stat i { flex:1; height:7px; background:rgba(255,255,255,.18); border-radius:9px; overflow:hidden; }
-#hud .stat em { display:block; height:100%; width:50%; background:#6c6; border-radius:9px; transition:width .5s, background .5s; }
+/* 暮らす範囲を決める */
+#zoneUI { position:fixed; inset:0; z-index:9; touch-action:none; background:rgba(0,0,0,.18); }
+#zoneRect { position:fixed; border:3px dashed #fff; background:rgba(255,79,129,.22); border-radius:10px; pointer-events:none; box-shadow:0 0 0 2px rgba(0,0,0,.25); }
+#zonePanel { position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); max-width:480px; margin:0 auto; background:rgba(10,10,20,.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-radius:20px; padding:14px 16px; text-align:center; line-height:1.55; }
+#zoneUI.top #zonePanel { top:calc(14px + env(safe-area-inset-top)); bottom:auto; }
+#zonePanel p { margin:0 0 10px; font-size:.95rem; }
+#zonePanel .row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+#zonePanel button { padding:10px 16px; font-size:.9rem; }
+#zoneSize { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+#zoneSize input { flex:1; accent-color:var(--accent); }
+.factRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:6px 0; font-size:.9rem; background:rgba(255,255,255,.08); border-radius:12px; padding:6px 10px; }
+.factRow button { padding:4px 10px; font-size:.8rem; }
 
 /* 吹き出し / トースト */
 #toast { position:fixed; bottom:calc(175px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); padding:8px 16px; border-radius:999px; font-size:.85rem; z-index:20; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap; max-width:92vw; overflow:hidden; text-overflow:ellipsis; }

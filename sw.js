@@ -1,8 +1,8 @@
 /* You AR — Service Worker
  * ・オフラインでも起動できるようにファイルを端末にキャッシュする
  * ・アプリを閉じている間に育成状態を確かめて通知する(Periodic Background Sync。サーバー不要) */
-const CACHE = 'youar-v1';
-const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'pet.js', 'manifest.json',
+const CACHE = 'youar-v2';
+const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'roommate.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png', 'icons/maskable-512.png'];
 const CDN = 'https://cdn.jsdelivr.net/';
 
@@ -46,28 +46,22 @@ const idbSet = (k, v) => new Promise(res => {
   r.onerror = () => res();
 });
 
-// pet.js と同じ減り方で、今の状態を見積もる
-function estimate(P) {
-  const h = Math.min(72, (Date.now() - P.lastTick) / 3600e3);
-  const hunger = Math.max(0, P.hunger - (P.sleeping ? 4 : 7) * h);
-  const energy = Math.max(0, Math.min(100, P.energy + (P.sleeping ? 25 : -5) * h));
-  const mood = Math.max(0, P.mood - 3 * h - (hunger < 25 ? 5 * h : 0));
-  return { hunger, energy, mood };
-}
+// 友達なので、責めるような通知はしない。しばらく会っていないときに、ひとことだけ送る
 async function checkPet() {
-  const P = await idbGet('pet'); const cfg = await idbGet('notify');
-  if (!P || !cfg || !cfg.on) return;
-  const s = estimate(P), name = P.name || 'ぼく';
+  const R = await idbGet('rm'), cfg = await idbGet('notify');
+  if (!R || !cfg || !cfg.on || !R.lastSeen) return;
+  const away = Date.now() - R.lastSeen, h = new Date().getHours();
+  if (h < 9 || h >= 22) return; // 夜と朝早くは鳴らさない
+  const call = R.userName ? R.userName + '、' : '';
   let body = null, tag = null;
-  if (s.hunger < 25) { body = 'おなかすいた…ごはんちょうだい!'; tag = 'hunger'; }
-  else if (s.mood < 25) { body = 'さみしいよ…会いにきて'; tag = 'mood'; }
-  else if ((Date.now() - P.lastSeen) > 24 * 3600e3) { body = 'ひさしぶりに会いたいな'; tag = 'miss'; }
+  if (away > 72 * 3600e3) { body = call + 'ひさしぶり。元気にしてる?'; tag = 'long'; }
+  else if (away > 24 * 3600e3) { body = call + '今日はどうしてた?また話そうよ'; tag = 'day'; }
   if (!body) return;
-  // 同じ通知を何度も出さない(6時間あける)
+  // 同じ通知は20時間あける
   const last = (cfg.last || {})[tag] || 0;
-  if (Date.now() - last < 6 * 3600e3) return;
+  if (Date.now() - last < 20 * 3600e3) return;
   cfg.last = Object.assign({}, cfg.last, { [tag]: Date.now() }); await idbSet('notify', cfg);
-  await self.registration.showNotification(name, { body, tag, icon:'icons/icon-192.png', badge:'icons/icon-192.png' });
+  await self.registration.showNotification(R.name || 'ルームメイト', { body, tag, icon:'icons/icon-192.png', badge:'icons/icon-192.png' });
 }
 self.addEventListener('periodicsync', e => { if (e.tag === 'pet-check') e.waitUntil(checkPet()); });
 self.addEventListener('message', e => { if (e.data === 'pet-check') e.waitUntil(checkPet()); });

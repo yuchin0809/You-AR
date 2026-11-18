@@ -1,10 +1,10 @@
 /* You AR — 土台:カメラ / 3Dモデル / ジェスチャ / 自撮り / 会話
- * 育成などの機能は window.YouAR.hooks に処理を差し込んで拡張する(pet.js)。 */
+ * 育成などの機能は window.YouAR.hooks に処理を差し込んで拡張する(roommate.js)。 */
 (() => {
   const $ = id => document.getElementById(id);
   const video = $('video'), stage = $('stage'), me = $('me'), bubble = $('bubble');
   const FX0 = () => ({ dx:0, dy:0, rot:0, sc:1, sy:1 });
-  const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', stream:null, fx:FX0(), baseFx:null, three:null, started:false, selfie:false };
+  const state = { x:0, y:0, s:1, r:0, flip:1, facing:'environment', stream:null, fx:FX0(), baseFx:null, three:null, started:false, selfie:false, walking:false, walkClip:false, hideMe:false };
   const hooks = {};
   let baseW = 0, baseH = 0;
 
@@ -28,8 +28,15 @@
 
   /* ---------- 描画ループ ---------- */
   let animating = false;
+  const addFx = (a, b) => ({ dx:a.dx + (b.dx || 0), dy:a.dy + (b.dy || 0), rot:a.rot + (b.rot || 0), sc:a.sc * (b.sc || 1), sy:a.sy * (b.sy || 1) });
+  // 待機中の姿勢(寝ている等) + 歩いているときの上下の揺れ
+  function bodyFx(now) {
+    let f = state.baseFx ? addFx(FX0(), state.baseFx(now)) : FX0();
+    if (state.walking && !state.walkClip) f = addFx(f, { dy:-Math.abs(Math.sin(now / 120)) * 7 * state.s, rot:Math.sin(now / 240) * .02 });
+    return f;
+  }
   (function loop(now) {
-    if (!animating && state.baseFx && baseH) { state.fx = Object.assign(FX0(), state.baseFx(now || 0)); render(); }
+    if (!animating && baseH && (state.baseFx || state.walking)) { state.fx = bodyFx(now || 0); render(); }
     if (state.three) state.three.frame();
     requestAnimationFrame(loop);
   })();
@@ -64,7 +71,7 @@
   function render() {
     if (!baseH) return;
     const [cx, cy] = center(), f = state.fx;
-    me.style.display = 'block';
+    me.style.display = state.hideMe ? 'none' : 'block';
     me.style.transform = `translate(${cx - baseW/2}px, ${cy - baseH/2}px) rotate(${state.r + f.rot}rad) scale(${state.s * state.flip * f.sc}, ${state.s * f.sc * f.sy})`;
     moveBubble();
   }
@@ -74,9 +81,8 @@
     if (bubble.hidden || !baseH) return;
     const [cx, cy] = center();
     bubble.style.left = Math.min(innerWidth - 20, Math.max(20, cx)) + 'px';
-    // 吹き出しはモデルの頭上に。ステータス表示とは重ならないようにする
-    const hud = document.getElementById('hud'), minTop = (hud && !hud.hidden ? hud.getBoundingClientRect().bottom : 50) + 8 + bubble.offsetHeight;
-    bubble.style.top = Math.max(minTop, cy - baseH * state.s / 2 - 8) + 'px';
+    // 吹き出しはモデルの頭上に(画面の上にはみ出さない)
+    bubble.style.top = Math.max(60 + bubble.offsetHeight, cy - baseH * state.s / 2 - 8) + 'px';
   }
   // 画面上の点がモデルの見えている部分に当たっているか(透明部分は外れ)
   function hitTest(px, py) {
@@ -110,6 +116,102 @@
     hooks.walk && hooks.walk();
   }
 
+  /* ---------- 暮らす範囲(ゾーン) ----------
+   * 画面上でなぞった四角形を、世界座標(=ジャイロで固定される座標)で覚える。
+   * 上の辺ほど奥なので小さく、下の辺ほど手前なので大きく表示する。 */
+  const zone = { on:false, x0:0, y0:0, x1:0, y1:0, sizeK:.7 };
+  const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
+  const zoneScale = fy => {
+    const d = Math.min(1, (zone.y1 - zone.y0) / (innerHeight * .4)), far = 1 - .45 * d, t = clampN((fy - zone.y0) / Math.max(1, zone.y1 - zone.y0), 0, 1);
+    return zone.sizeK * (far + (1 - far) * t);
+  };
+  const feet = () => [state.x, state.y + baseH * state.s / 2];
+  const toWorld = (px, py) => { const [ox, oy] = off(); return [px - ox, py - oy]; };
+  function placeAt(wx, wfy) {
+    wx = clampN(wx, zone.x0, zone.x1); wfy = clampN(wfy, zone.y0, zone.y1);
+    state.s = zoneScale(wfy); state.x = wx; state.y = wfy - baseH * state.s / 2; render();
+  }
+  const zoneRandom = () => [zone.x0 + Math.random() * (zone.x1 - zone.x0), zone.y0 + Math.random() * (zone.y1 - zone.y0)];
+  const zoneFront = () => [(zone.x0 + zone.x1) / 2, zone.y1 - 4];
+  const inZone = (wx, wfy) => wx >= zone.x0 && wx <= zone.x1 && wfy >= zone.y0 && wfy <= zone.y1;
+
+  let walkTok = 0;
+  function endWalk() {
+    state.walking = false;
+    if (state.walkClip && state.three) state.three.stopLoop();
+    state.walkClip = false;
+    if (!state.baseFx && !animating) { state.fx = FX0(); render(); }
+  }
+  function stopWalk() { walkTok++; cancelAnimationFrame(walkRaf); if (state.walking) endWalk(); }
+  // 世界座標の(tx, tfy)=足元の位置まで歩く。着いたら true、途中で止められたら false
+  function walkWorld(tx, tfy) {
+    const tok = ++walkTok; cancelAnimationFrame(walkRaf);
+    tx = clampN(tx, zone.x0, zone.x1); tfy = clampN(tfy, zone.y0, zone.y1);
+    const [sx, sfy] = feet(), dist = Math.hypot(tx - sx, tfy - sfy);
+    if (dist < 8) return Promise.resolve(true);
+    const dur = clampN(dist / (60 + 140 * state.s) * 1000, 500, 9000);
+    state.walking = true;
+    if (!state.walkClip) state.walkClip = !!(state.three && state.three.loop && state.three.loop('walk'));
+    hooks.walk && hooks.walk();
+    return new Promise(res => {
+      const t0 = performance.now();
+      const step = now => {
+        if (tok !== walkTok) return res(false);
+        const t = Math.min(1, (now - t0) / dur), e = t * t * (3 - 2 * t);
+        placeAt(sx + (tx - sx) * e, sfy + (tfy - sfy) * e);
+        if (t < 1) walkRaf = requestAnimationFrame(step); else { endWalk(); res(true); }
+      };
+      walkRaf = requestAnimationFrame(step);
+    });
+  }
+
+  const zoneStore = { get() { try { return JSON.parse(localStorage.getItem('youar.zone')); } catch (_) { return null; } }, set(v) { try { localStorage.setItem('youar.zone', JSON.stringify(v)); } catch (_) {} } };
+  // 起動時に「暮らす範囲」を決める。完了したら resolve
+  function runZoneSetup() {
+    return new Promise(resolve => {
+      const ui = $('zoneUI'), rectEl = $('zoneRect'), msg = $('zoneMsg'), btns = $('zoneBtns'), sizeBox = $('zoneSize'), range = $('sizeRange');
+      const saved = zoneStore.get(), W = () => innerWidth, H = () => innerHeight;
+      let r = null, drag = null, mode = 'draw';
+      stopWalk(); zone.on = false; state.hideMe = true; render();
+      ui.hidden = false; bubble.hidden = true; $('bar').style.display = 'none';
+      const valid = () => r && r.x1 - r.x0 >= 90 && r.y1 - r.y0 >= 36;
+      const button = (label, fn, cls = '', dis = false) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.disabled = dis; b.onclick = () => fn(); btns.append(b); return b; };
+      const showRect = () => { rectEl.hidden = !r; if (r) Object.assign(rectEl.style, { left:r.x0 + 'px', top:r.y0 + 'px', width:(r.x1 - r.x0) + 'px', height:(r.y1 - r.y0) + 'px' }); };
+      function stepDraw() {
+        mode = 'draw'; ui.classList.remove('top'); btns.textContent = ''; sizeBox.hidden = true; state.hideMe = true; render(); showRect();
+        msg.innerHTML = '<b>① 暮らす場所を決めよう</b><br>床を映して、僕が歩き回っていい範囲を、指でなぞって囲んでね。足元が来る場所だよ。';
+        const next = button('つぎへ', stepSize, '', !valid());
+        stepDraw.next = next;
+        if (saved) button('前回の範囲を使う', () => { r = { x0:saved.x0 * W(), y0:saved.y0 * H(), x1:saved.x1 * W(), y1:saved.y1 * H() }; stepSize(saved.sizeK); }, 'sub');
+        button('おまかせ', () => { r = { x0:W() * .1, y0:H() * .42, x1:W() * .9, y1:H() * .72 }; stepSize(); }, 'sub');
+      }
+      function applyRect() {
+        const [wx0, wy0] = toWorld(r.x0, r.y0), [wx1, wy1] = toWorld(r.x1, r.y1);
+        Object.assign(zone, { on:true, x0:wx0, y0:wy0, x1:wx1, y1:wy1 });
+      }
+      function stepSize(k) {
+        mode = 'size'; ui.classList.add('top'); btns.textContent = ''; rectEl.hidden = false; showRect();
+        applyRect(); zone.sizeK = k || zone.sizeK || .7; range.value = Math.round(zone.sizeK * 100); sizeBox.hidden = false;
+        state.hideMe = false; state.r = 0; state.flip = state.flip || 1; placeAt((zone.x0 + zone.x1) / 2, zone.y1 - 4);
+        msg.innerHTML = '<b>② 大きさを合わせよう</b><br>手前の端に立ったとき、ちょうどいい大きさにしてね。';
+        button('もどる', stepDraw, 'sub'); button('ここで暮らす', finish);
+      }
+      range.oninput = () => { const [fx, ffy] = feet(); zone.sizeK = range.value / 100; placeAt(fx, ffy); };
+      function finish() {
+        zoneStore.set({ x0:r.x0 / W(), y0:r.y0 / H(), x1:r.x1 / W(), y1:r.y1 / H(), sizeK:zone.sizeK });
+        ui.hidden = true; rectEl.hidden = true; state.hideMe = false;
+        const [x, y] = zoneRandom(); placeAt(x, y);
+        if (!state.selfie) $('bar').style.display = 'flex';
+        render(); resolve();
+      }
+      // なぞって範囲を描く
+      ui.onpointerdown = e => { if (mode !== 'draw' || e.target.closest('#zonePanel')) return; ui.setPointerCapture(e.pointerId); drag = { x:e.clientX, y:e.clientY }; r = { x0:e.clientX, y0:e.clientY, x1:e.clientX, y1:e.clientY }; showRect(); };
+      ui.onpointermove = e => { if (!drag) return; r = { x0:Math.min(drag.x, e.clientX), y0:Math.min(drag.y, e.clientY), x1:Math.max(drag.x, e.clientX), y1:Math.max(drag.y, e.clientY) }; showRect(); };
+      ui.onpointerup = ui.onpointercancel = () => { if (!drag) return; drag = null; if (stepDraw.next) stepDraw.next.disabled = !valid(); if (!valid()) { r = null; showRect(); toast('もう少し大きく囲んでね'); } };
+      stepDraw();
+    });
+  }
+
   /* ---------- ジェスチャ ----------
    * 1本指:モデルの上なら「なでる」(動かす)/「つつく」(タップ)
    * 2本指:移動・拡大・回転 / 何もない所をダブルタップ:そこへ移動 / マウスは空白ドラッグで移動 */
@@ -118,7 +220,7 @@
     stage.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, e);
     if (ptrs.size === 1) {
       const onMe = hitTest(e.clientX, e.clientY);
-      g = { type: onMe ? 'touch' : (e.pointerType === 'mouse' ? 'move' : 'none'), sx:e.clientX, sy:e.clientY, t:performance.now() };
+      g = { type: onMe ? 'touch' : (e.pointerType === 'mouse' && !zone.on ? 'move' : 'none'), sx:e.clientX, sy:e.clientY, t:performance.now() };
     } else { g = { type:'pinch' }; pinch = null; }
   });
   stage.addEventListener('pointermove', e => {
@@ -133,8 +235,11 @@
       const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), ang = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
       const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
       if (pinch) {
-        state.s = Math.min(6, Math.max(0.1, state.s * dist / pinch.dist)); state.r += ang - pinch.ang;
-        state.x += mx - pinch.mx; state.y += my - pinch.my;
+        if (zone.on) { const [fx, ffy] = feet(); zone.sizeK = clampN(zone.sizeK * dist / pinch.dist, .2, 1.6); placeAt(fx, ffy); }  // 暮らす範囲の中では、つまんで大きさだけ変える
+        else {
+          state.s = Math.min(6, Math.max(0.1, state.s * dist / pinch.dist)); state.r += ang - pinch.ang;
+          state.x += mx - pinch.mx; state.y += my - pinch.my;
+        }
       }
       pinch = { dist, ang, mx, my }; render();
     }
@@ -145,13 +250,22 @@
       const now = performance.now(), moved = Math.hypot(e.clientX - g.sx, e.clientY - g.sy);
       if (moved < 12 && now - g.t < 350) {
         if (g.type === 'touch') hooks.poke && hooks.poke(e.clientX, e.clientY);
-        else { if (now - lastTap < 380) { walkTo(e.clientX, e.clientY); lastTap = 0; } else lastTap = now; }
+        else if (now - lastTap < 380) {
+          lastTap = 0;
+          if (zone.on) { const [wx, wy] = toWorld(e.clientX, e.clientY); hooks.call ? hooks.call(wx, wy) : walkWorld(wx, wy); }
+          else walkTo(e.clientX, e.clientY);
+        } else lastTap = now;
       }
     }
+    if (zone.on && pinch) { const k = zoneStore.get(); if (k) { k.sizeK = zone.sizeK; zoneStore.set(k); } }
     ptrs.delete(e.pointerId); pinch = null; if (!ptrs.size) g = null;
   };
   stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
-  stage.addEventListener('wheel', e => { e.preventDefault(); state.s = Math.min(6, Math.max(0.1, state.s * (e.deltaY < 0 ? 1.08 : 0.92))); render(); }, { passive:false });
+  stage.addEventListener('wheel', e => {
+    e.preventDefault(); const k = e.deltaY < 0 ? 1.08 : 0.92;
+    if (zone.on) { const [fx, ffy] = feet(); zone.sizeK = clampN(zone.sizeK * k, .2, 1.6); placeAt(fx, ffy); }
+    else { state.s = Math.min(6, Math.max(0.1, state.s * k)); render(); }
+  }, { passive:false });
 
   /* ---------- ジャイロで空間に固定 ---------- */
   const HFOV = 60; // 想定する水平画角(度)
@@ -217,7 +331,9 @@
   /* ---------- 自撮りモード(内カメラ・並んで撮る) ---------- */
   let before = null;
   async function enterSelfie() {
-    before = { facing:state.facing, x:state.x, y:state.y, s:state.s, r:state.r, anchor:state.anchorOn };
+    stopWalk();
+    before = { facing:state.facing, x:state.x, y:state.y, s:state.s, r:state.r, anchor:state.anchorOn, zone:zone.on };
+    zone.on = false;
     state.facing = 'user';
     try { await startCamera(); } catch (_) { state.facing = before.facing; return; }
     setAnchor(false);
@@ -230,7 +346,7 @@
     state.selfie = false;
     $('selfieUI').hidden = true; $('bar').style.display = 'flex';
     if (!before) return;
-    state.facing = before.facing; Object.assign(state, { x:before.x, y:before.y, s:before.s, r:before.r });
+    state.facing = before.facing; Object.assign(state, { x:before.x, y:before.y, s:before.s, r:before.r }); zone.on = before.zone;
     await startCamera().catch(() => {});
     setAnchor(before.anchor); render();
   }
@@ -269,8 +385,8 @@
     cancelAnimationFrame(animRaf); animating = true;
     const step = now => {
       const t = Math.min(1, (now - t0) / A.d);
-      if (t < 1) { state.fx = Object.assign(FX0(), state.baseFx ? state.baseFx(now) : {}, A.f(t)); render(); animRaf = requestAnimationFrame(step); }
-      else { animating = false; state.fx = Object.assign(FX0(), state.baseFx ? state.baseFx(now) : {}); render(); }
+      if (t < 1) { state.fx = addFx(bodyFx(now), A.f(t)); render(); animRaf = requestAnimationFrame(step); }
+      else { animating = false; state.fx = bodyFx(now); render(); }
     };
     animRaf = requestAnimationFrame(step);
   }
@@ -313,20 +429,13 @@
     })().catch(e => { engineLoading = null; throw e; });
     return engineLoading;
   }
-  async function llmUnderstand(text) {
+  // 返事をJSONで返させる(システム文と直近の会話を渡す)。失敗したら null
+  async function llmJSON(system, messages) {
     try {
       const e = await getEngine();
-      const persona = hooks.persona ? hooks.persona() : '';
-      const r = await e.chat.completions.create({
-        temperature: .5, max_tokens: 120,
-        messages: [
-          { role:'system', content:'あなたは話しかけられた親しみやすいキャラクターです。' + persona + '相手の発話を15字以内で要約し、動作ラベルを1つ選び、20字以内の短い日本語の返事を考えてください。JSONのみ出力: {"summary":"","intent":"","reply":""}。intentは次のいずれか: ' + TALK_INTENTS.join(',') },
-          { role:'user', content:text }
-        ]
-      });
+      const r = await e.chat.completions.create({ temperature:.7, max_tokens:160, messages:[{ role:'system', content:system }, ...messages] });
       const m = r.choices[0].message.content.match(/\{[\s\S]*\}/);
-      const j = JSON.parse(m[0]);
-      return { intent: TALK_INTENTS.includes(j.intent) ? j.intent : 'yes', reply: String(j.reply || 'うん'), summary: String(j.summary || text) };
+      return JSON.parse(m[0]);
     } catch (err) {
       toast('AI理解に失敗したので簡易判定にします: ' + (err.message || err)); $('llm').checked = false; return null;
     }
@@ -352,14 +461,8 @@
   }
   async function handle(text) {
     text = (text || '').trim(); if (!text) return;
-    if (hooks.intercept && hooks.intercept(text)) return; // 育成側で処理済み
-    showBubble('…', '「' + text + '」');
-    let r = null;
-    if ($('llm').checked) r = await llmUnderstand(text);
-    if (!r) r = ruleUnderstand(text);
-    if (hooks.adjust) r = hooks.adjust(r, text) || r;
-    say(r.reply, r.intent, { summary:'「' + r.summary + '」' });
-    hooks.afterTalk && hooks.afterTalk(r, text);
+    if (hooks.talk) return hooks.talk(text);
+    const r = ruleUnderstand(text); say(r.reply, r.intent, { summary:'「' + r.summary + '」' });
   }
 
   // 入力欄 / マイク
@@ -384,7 +487,7 @@
     sad:['sad','cry','sorrow','悲'], bye:['bye','farewell','バイバイ'], yes:['yes','nod','agree','thumbs','うなず'],
     no:['reject','headshake','head shake','refuse','首を振'], surprise:['surpris','shock','scare','startle','驚'],
     dance:['danc','samba','hiphop','hip hop','twerk','breakdance','踊'], eat:['eat','drink','食'],
-    pet:['shy','blush','giggl','照'], idle:['idle','breath','stand']
+    pet:['shy','blush','giggl','照'], walk:['walk','stroll','jog'], idle:['idle','breath','stand']
   };
   const motionPool = []; // { name, clip, tags:Set }
   let renderer3 = null, loaderLib = null, lastPick = null;
@@ -434,7 +537,7 @@
 
       const mixer = new T.AnimationMixer(model);
       const ctx = me.getContext('2d'), clock = new T.Clock();
-      let current = null, idleAction = null;
+      let current = null, idleAction = null, loopAction = null;
       const make = clip => {
         // 他のモデル由来の動きを合わせる:Hipsの位置だけ縮尺を合わせ、その場で動かす。他の位置トラックは捨てる
         const c = clip.clone();
@@ -460,6 +563,18 @@
           const onEnd = e => { if (e.action !== a) return; mixer.removeEventListener('finished', onEnd); if (idleAction) { idleAction.reset().play(); a.crossFadeTo(idleAction, .3, false); } current = idleAction; };
           mixer.addEventListener('finished', onEnd);
           return true;
+        },
+        // 歩きなど、繰り返し再生する動き(あれば true)
+        loop(id) {
+          if (loopAction) return true;
+          const cand = motionPool.filter(m => m.tags.has(id)); if (!cand.length) return false;
+          const a = make(cand[Math.floor(Math.random() * cand.length)].clip); a.reset().setLoop(T.LoopRepeat, Infinity);
+          if (current && current !== a) current.crossFadeTo(a, .25, false);
+          a.play(); current = a; loopAction = a; return true;
+        },
+        stopLoop() {
+          if (!loopAction) return; const a = loopAction; loopAction = null;
+          if (idleAction) { idleAction.reset().play(); a.crossFadeTo(idleAction, .3, false); current = idleAction; } else { a.fadeOut(.3); current = null; }
         },
         frame() {
           mixer.update(clock.getDelta());
@@ -516,13 +631,15 @@
   $('go').onclick = async () => {
     await enableMotion();
     try { await startCamera(); } catch (_) { return; }
-    $('start').style.display = 'none'; $('bar').style.display = 'flex'; $('gear').style.display = 'block';
-    place(); render(); state.started = true;
-    hooks.started ? hooks.started() : toast('1本指でなでる / 2本指で移動・拡大');
+    $('start').style.display = 'none'; refAnchor();
+    await runZoneSetup();               // 暮らす範囲を決めてもらう
+    $('gear').style.display = 'block'; state.started = true;
+    hooks.started ? hooks.started() : toast('ダブルタップで呼べるよ');
   };
   $('flip').onclick = async () => { state.facing = state.facing === 'environment' ? 'user' : 'environment'; await startCamera(); };
   $('mirror').onclick = () => { state.flip *= -1; render(); };
   $('gear').onclick = () => { $('panel').hidden = false; };
+  $('zoneBtn').onclick = async () => { $('panel').hidden = true; await runZoneSetup(); hooks.zoneChanged && hooks.zoneChanged(); };
   $('closePanel').onclick = () => { $('panel').hidden = true; };
   addEventListener('resize', () => render());
 
@@ -549,5 +666,6 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 育成などの拡張用API
-  window.YouAR = { $, idb, state, hooks, play, say, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render };
+  window.YouAR = { $, idb, state, hooks, zone, play, say, showBubble, speak, toast, pick, hitTest, headPoint, center, setBaseFx, render,
+    walkWorld, stopWalk, placeAt, feet, toWorld, zoneRandom, zoneFront, inZone, runZoneSetup, llmJSON, ruleUnderstand, takeShot, TALK_INTENTS };
 })();
