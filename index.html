@@ -28,14 +28,14 @@
 </head>
 <body>
 <video id="video" playsinline muted autoplay></video>
-<div id="stage"><img id="me" alt="me"></div>
+<div id="stage"><canvas id="me"></canvas></div>
 
 <div id="start">
   <h1>You AR</h1>
   <p>カメラ越しの世界に「あなた」を登場させます。<br>
-     写真を選んで、カメラを起動してください。映像は端末の外に送信されません。</p>
-  <label class="btn sub" for="file0">① 自分の写真を選ぶ</label>
-  <input id="file0" type="file" accept="image/*">
+     写真を選んで、カメラを起動してください。映像は端末の外に送信されません。<br>動きを出したいときは、無地(緑など)の背景で撮った全身動画を選んでください。</p>
+  <label class="btn sub" for="file0">① 自分の写真・動画を選ぶ</label>
+  <input id="file0" type="file" accept="image/*,video/*">
   <button id="go" disabled>② ARを始める</button>
   <p id="hint" style="font-size:.85rem"></p>
 </div>
@@ -47,8 +47,8 @@
     <label class="range"><input id="anchor" type="checkbox" checked> 空間に固定</label>
   </div>
   <div class="row">
-    <label class="btn sub" for="file1">写真変更</label>
-    <input id="file1" type="file" accept="image/*">
+    <label class="btn sub" for="file1">写真/動画変更</label>
+    <input id="file1" type="file" accept="image/*,video/*">
     <button class="sub" id="flip">カメラ切替</button>
     <button class="sub" id="mirror">左右反転</button>
     <button id="shot">📷 撮影</button>
@@ -65,46 +65,54 @@
 
   const toast = msg => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),2200); };
 
-  /* ---------- 画像読み込み & 背景除去 ---------- */
+  /* ---------- 画像・動画の読み込み & 背景除去 ---------- */
+  state.vid = null;
   function loadFile(file) {
     if (!file) return;
-    const img = new Image();
-    img.onload = () => {
-      const max = 1200, k = Math.min(1, max / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      state.src = c; applyKey(); $('go').disabled = false;
-      $('hint').textContent = '写真を読み込みました';
-    };
-    img.src = URL.createObjectURL(file);
+    const url = URL.createObjectURL(file);
+    if (state.vid) { state.vid.pause(); state.vid = null; }
+    state.src = null;
+    if (file.type.startsWith('video')) {
+      const v = document.createElement('video');
+      v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', '');
+      v.onloadeddata = () => { v.play().catch(()=>{}); state.vid = v; setSource(v.videoWidth, v.videoHeight, 720); keyFrame(v); $('go').disabled = false; $('hint').textContent = '動画を読み込みました'; };
+      v.src = url;
+    } else {
+      const img = new Image();
+      img.onload = () => { state.src = img; setSource(img.width, img.height, 1200); keyFrame(img); $('go').disabled = false; $('hint').textContent = '写真を読み込みました'; };
+      img.src = url;
+    }
   }
 
-  // 四隅の色を背景とみなし、近い色を透明にする(単色背景向けの簡易クロマキー)
-  function applyKey() {
-    const src = state.src; if (!src) return;
-    const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
-    const g = c.getContext('2d', { willReadFrequently:true });
-    g.drawImage(src, 0, 0);
-    if ($('keyOn').checked) {
-      const d = g.getImageData(0, 0, c.width, c.height), a = d.data, W = c.width, H = c.height;
-      const pts = [[2,2],[W-3,2],[2,H-3],[W-3,H-3]].map(([x,y]) => { const i=(y*W+x)*4; return [a[i],a[i+1],a[i+2],a[i+3]]; });
-      if (pts.some(p => p[3] < 250)) { /* すでに透過PNG */ }
-      else {
-        const bg = [0,1,2].map(k => pts.reduce((s,p)=>s+p[k],0)/4);
-        const tol = +$('tol').value, soft = 25;
-        for (let i = 0; i < a.length; i += 4) {
-          const dist = Math.hypot(a[i]-bg[0], a[i+1]-bg[1], a[i+2]-bg[2]);
-          if (dist < tol) a[i+3] = 0;
-          else if (dist < tol + soft) a[i+3] = Math.round(255 * (dist - tol) / soft);
-        }
-        g.putImageData(d, 0, 0);
-      }
-    }
-    state.cut = c;
-    me.src = c.toDataURL('image/png');
-    me.onload = () => { baseH = Math.min(innerHeight * 0.6, c.height); baseW = baseH * c.width / c.height; me.style.width = baseW+'px'; me.style.height = baseH+'px'; if (!me.dataset.placed) { place(); me.dataset.placed = 1; } render(); };
+  function setSource(w, h, max) {
+    const k = Math.min(1, max / Math.max(w, h));
+    me.width = Math.round(w * k); me.height = Math.round(h * k);
+    baseH = Math.min(innerHeight * 0.6, me.height); baseW = baseH * me.width / me.height;
+    me.style.width = baseW + 'px'; me.style.height = baseH + 'px';
+    if (!me.dataset.placed) { place(); me.dataset.placed = 1; }
+    render();
   }
+
+  // 四隅の色を背景とみなし、近い色を透明にする(無地・グリーンバック向けの簡易クロマキー)
+  function keyFrame(source) {
+    const g = me.getContext('2d', { willReadFrequently:true }), W = me.width, H = me.height;
+    g.clearRect(0, 0, W, H); g.drawImage(source, 0, 0, W, H);
+    if (!$('keyOn').checked) return;
+    const d = g.getImageData(0, 0, W, H), a = d.data;
+    const pts = [[2,2],[W-3,2],[2,H-3],[W-3,H-3]].map(([x,y]) => { const i=(y*W+x)*4; return [a[i],a[i+1],a[i+2],a[i+3]]; });
+    if (pts.some(p => p[3] < 250)) return; // すでに透過あり
+    const bg = [0,1,2].map(k => pts.reduce((s,p)=>s+p[k],0)/4);
+    const tol = +$('tol').value, soft = 25;
+    for (let i = 0; i < a.length; i += 4) {
+      const dist = Math.hypot(a[i]-bg[0], a[i+1]-bg[1], a[i+2]-bg[2]);
+      if (dist < tol) a[i+3] = 0;
+      else if (dist < tol + soft) a[i+3] = Math.round(255 * (dist - tol) / soft);
+    }
+    g.putImageData(d, 0, 0);
+  }
+  state.cut = me;
+  function applyKey() { if (state.src) keyFrame(state.src); }
+  (function loop() { if (state.vid && state.vid.readyState >= 2) keyFrame(state.vid); requestAnimationFrame(loop); })();
 
   /* ---------- カメラ ---------- */
   async function startCamera() {
